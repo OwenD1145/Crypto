@@ -27,7 +27,7 @@ if 'trading_active' not in st.session_state:
 
 # Configure page
 st.set_page_config(
-    page_title="DeepSeek Crypto Trader",
+    page_title="Crypto Trader",
     page_icon="🚀",
     layout="wide"
 )
@@ -169,7 +169,7 @@ def show_real_time_data(symbol, interval):
         st.session_state.ws_connected = True
 
 # Main app structure
-st.title("🚀 DeepSeek Autonomous Crypto Trader")
+st.title("🚀 Autonomous Crypto Trader")
 st.markdown("---")
 
 # Sidebar configuration

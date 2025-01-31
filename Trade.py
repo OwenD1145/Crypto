@@ -27,7 +27,7 @@ if 'trading_active' not in st.session_state:
 
 # Configure page
 st.set_page_config(
-    page_title="DeepSeek Crypto Trader",
+    page_title="Crypto Trader",
     page_icon="🚀",
     layout="wide"
 )
@@ -173,7 +173,7 @@ def show_real_time_data(symbol, interval):
         st.session_state.ws_connected = True
 
 # Main app structure
-st.title("🚀 DeepSeek Autonomous Crypto Trader")
+st.title("🚀 Autonomous Crypto Trader")
 st.markdown("---")
 
 # Sidebar configuration
@@ -333,4 +333,6 @@ st.markdown("""
 - WebSocket connections are properly terminated  
 - All trades use testnet by default  
 - Never shares your actual API keys with anyone
+- - This tool is for educational purposes only. OD is not an experienced trader. or coder.. use at your own risk with your own funds 
+
 """)

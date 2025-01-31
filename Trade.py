@@ -81,7 +81,7 @@ def vectorized_backtest(data):
     if len(data) < 20:  # Minimum data length requirement
         return pd.DataFrame()
     signals = pd.DataFrame(index=data.index)
-    signals['signal'] = np.where(data['rsi'] < 30, 1, np.where(data['rsi'] > 70, -1, 0)
+    signals['signal'] = np.where(data['rsi'] < 30, 1), np.where(data['rsi'] > 70, -1, 0)
     signals['returns'] = data['close'].pct_change()
     signals['strategy'] = signals['signal'].shift(1) * signals['returns']
     return signals

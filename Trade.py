@@ -329,4 +329,5 @@ st.markdown("""
 - WebSocket connections are properly terminated  
 - All trades use testnet by default  
 - Never shares your actual API keys with anyone
+- This tool is for educational purposes only. OD is not an experienced trader. or coder.. use at your own risk with your own funds 
 """)

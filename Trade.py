@@ -27,7 +27,7 @@ if 'trading_active' not in st.session_state:
 
 # Configure page
 st.set_page_config(
-    page_title="Crypto Trader",
+    page_title="DeepSeek Crypto Trader",
     page_icon="🚀",
     layout="wide"
 )
@@ -93,19 +93,23 @@ def prepare_training_data(df):
     features = df[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower']]
     target = df['target']
     
-    # Ensure no NaN values remain
-    features = features.dropna()
-    target = target[features.index]
+    # Ensure no NaN values remain and align indices
+    valid_indices = features.dropna().index.intersection(target.index)
+    features = features.loc[valid_indices]
+    target = target.loc[valid_indices]
     
     return features, target
 
 def train_model(features, target):
-    # Split data ensuring no data leakage
+    # Split data ensuring valid indices
     split_index = int(len(features) * 0.8)
-    X_train = features.iloc[:split_index]
-    X_test = features.iloc[split_index:]
-    y_train = target.iloc[:split_index]
-    y_test = target.iloc[split_index:]
+    train_indices = features.index[:split_index]
+    test_indices = features.index[split_index:]
+    
+    X_train = features.loc[train_indices]
+    X_test = features.loc[test_indices]
+    y_train = target.loc[train_indices]
+    y_test = target.loc[test_indices]
     
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
@@ -114,7 +118,7 @@ def train_model(features, target):
     predictions = model.predict(X_test)
     accuracy = accuracy_score(y_test, predictions)
     
-    return model, accuracy, X_test, y_test
+    return model, accuracy, test_indices
 
 # Trading functions
 def execute_trade_action(client, symbol, prediction, price):
@@ -169,7 +173,7 @@ def show_real_time_data(symbol, interval):
         st.session_state.ws_connected = True
 
 # Main app structure
-st.title("🚀 Autonomous Crypto Trader")
+st.title("🚀 DeepSeek Autonomous Crypto Trader")
 st.markdown("---")
 
 # Sidebar configuration
@@ -177,7 +181,7 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Binance US API Key", type='password')
     api_secret = st.text_input("Binance US API Secret", type='password')
-    symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+    symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
     interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
     
     if st.button("🔌 Connect to Exchange"):
@@ -235,16 +239,16 @@ with tab3:
         if st.button("Train Model"):
             with st.spinner("Training model..."):
                 features, target = prepare_training_data(st.session_state.hist_data.copy())
-                model, accuracy, X_test, y_test = train_model(features, target)
+                model, accuracy, test_indices = train_model(features, target)
                 
                 if model:
                     st.session_state.model = model
                     st.success(f"Model trained (Accuracy: {accuracy:.2%})")
                     
                     # Backtesting visualization
-                    test_data = st.session_state.hist_data.iloc[X_test.index]
+                    test_data = st.session_state.hist_data.loc[test_indices]
                     test_data['returns'] = np.log(test_data['close'] / test_data['close'].shift(1))
-                    test_data['strategy'] = test_data['returns'] * y_test
+                    test_data['strategy'] = test_data['returns'] * model.predict(features.loc[test_indices])
                     
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(
@@ -329,5 +333,4 @@ st.markdown("""
 - WebSocket connections are properly terminated  
 - All trades use testnet by default  
 - Never shares your actual API keys with anyone
-- This tool is for educational purposes only. OD is not an experienced trader. or coder.. use at your own risk with your own funds 
 """)

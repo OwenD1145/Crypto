@@ -22,12 +22,13 @@ if 'trading_active' not in st.session_state:
         'twm': None,
         'ws_connected': False,
         'api_key': None,
-        'api_secret': None
+        'api_secret': None,
+        'testnet': True  # Default to testnet for safety
     })
 
 # Configure page
 st.set_page_config(
-    page_title="Crypto Trader",
+    page_title="DeepSeek Crypto Trader",
     page_icon="🚀",
     layout="wide"
 )
@@ -84,73 +85,62 @@ def fetch_historical_data(client, symbol, interval, days=90):
 
 # ML model functions
 def prepare_training_data(df):
-    # Create target variable (1 if price increases, 0 otherwise)
     df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
-    
-    # Remove the last row since we don't have a target for it
     df = df[:-1]
-    
     features = df[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower']]
     target = df['target']
-    
-    # Ensure no NaN values remain and align indices
     valid_indices = features.dropna().index.intersection(target.index)
-    features = features.loc[valid_indices]
-    target = target.loc[valid_indices]
-    
-    return features, target
+    return features.loc[valid_indices], target.loc[valid_indices]
 
 def train_model(features, target):
-    # Split data ensuring valid indices
     split_index = int(len(features) * 0.8)
-    train_indices = features.index[:split_index]
-    test_indices = features.index[split_index:]
-    
-    X_train = features.loc[train_indices]
-    X_test = features.loc[test_indices]
-    y_train = target.loc[train_indices]
-    y_test = target.loc[test_indices]
+    X_train = features.iloc[:split_index]
+    X_test = features.iloc[split_index:]
+    y_train = target.iloc[:split_index]
+    y_test = target.iloc[split_index:]
     
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
-    
-    # Calculate accuracy
-    predictions = model.predict(X_test)
-    accuracy = accuracy_score(y_test, predictions)
-    
-    return model, accuracy, test_indices
+    accuracy = accuracy_score(y_test, model.predict(X_test))
+    return model, accuracy, X_test.index
 
 # Trading functions
 def execute_trade_action(client, symbol, prediction, price):
     try:
+        # Get account information to check permissions
+        account_info = client.get_account()
+        if account_info['canTrade'] is False:
+            raise Exception("Account does not have trading permissions")
+        
         if prediction == 1:  # Buy signal
             balance = client.get_asset_balance(asset='USDT')
             usdt_balance = float(balance['free'])
             if usdt_balance > 10:
                 quantity = (usdt_balance * 0.99) / price
-                return client.order_market_buy(
+                order = client.order_market_buy(
                     symbol=symbol,
                     quantity=round(quantity, 5)
                 )
+                return order
         else:  # Sell signal
             asset = symbol.replace('USDT', '')
             balance = client.get_asset_balance(asset=asset)
             asset_balance = float(balance['free'])
             if asset_balance > 0:
-                return client.order_market_sell(
+                order = client.order_market_sell(
                     symbol=symbol,
                     quantity=round(asset_balance, 5)
                 )
+                return order
         return None
     except Exception as e:
-        st.error(f"Trade error: {str(e)}")
+        st.error(f"Trade execution failed: {str(e)}")
         return None
 
 # UI Components
 def show_real_time_data(symbol, interval):
     st.header("📈 Real-Time Market Data")
     price_placeholder = st.empty()
-    chart_placeholder = st.empty()
     
     def handle_socket_message(msg):
         if msg['e'] == 'kline':
@@ -162,7 +152,8 @@ def show_real_time_data(symbol, interval):
         st.session_state.twm = ThreadedWebsocketManager(
             api_key=st.session_state.api_key,
             api_secret=st.session_state.api_secret,
-            tld='us'
+            tld='us',
+            testnet=st.session_state.testnet
         )
         st.session_state.twm.start()
         st.session_state.twm.start_kline_socket(
@@ -173,16 +164,17 @@ def show_real_time_data(symbol, interval):
         st.session_state.ws_connected = True
 
 # Main app structure
-st.title("🚀 Autonomous Crypto Trader")
+st.title("🚀 DeepSeek Autonomous Crypto Trader")
 st.markdown("---")
 
 # Sidebar configuration
 with st.sidebar:
     st.header("⚙️ Configuration")
-    api_key = st.text_input("Binance US API Key", type='password')
-    api_secret = st.text_input("Binance US API Secret", type='password')
+    api_key = st.text_input("Binance API Key", type='password')
+    api_secret = st.text_input("Binance API Secret", type='password')
     symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
     interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
+    st.session_state.testnet = st.checkbox("Use Testnet", value=True)
     
     if st.button("🔌 Connect to Exchange"):
         try:
@@ -190,11 +182,17 @@ with st.sidebar:
                 api_key=api_key,
                 api_secret=api_secret,
                 tld='us',
-                testnet=True
+                testnet=st.session_state.testnet
             )
             st.session_state.api_key = api_key
             st.session_state.api_secret = api_secret
-            st.success("Successfully connected to Binance US!")
+            
+            # Verify connection and permissions
+            account_info = st.session_state.client.get_account()
+            if not account_info['canTrade']:
+                raise Exception("API key does not have trading permissions")
+            
+            st.success("Successfully connected to Binance!")
         except Exception as e:
             st.error(f"Connection failed: {str(e)}")
 
@@ -205,7 +203,7 @@ with tab1:
     if st.session_state.client:
         show_real_time_data(symbol, interval)
     else:
-        st.warning("Please connect to Binance US in the sidebar")
+        st.warning("Please connect to Binance in the sidebar")
 
 with tab2:
     if st.session_state.client:
@@ -231,7 +229,7 @@ with tab2:
                     fig.update_layout(title=f"{symbol} Price History")
                     st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("Connect to Binance US first")
+        st.warning("Connect to Binance first")
 
 with tab3:
     if 'hist_data' in st.session_state:
@@ -331,8 +329,6 @@ st.markdown("""
 **🔒 Security Note:**  
 - API credentials are stored only in session state  
 - WebSocket connections are properly terminated  
-- All trades use testnet by default  
-- Never shares your actual API keys with anyone
-- - This tool is for educational purposes only. OD is not an experienced trader. or coder.. use at your own risk with your own funds 
-
+- Testnet is enabled by default for safety  
+- Never share your actual API keys with anyone
 """)

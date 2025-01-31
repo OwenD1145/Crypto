@@ -20,7 +20,9 @@ if 'trading_active' not in st.session_state:
         'hist_data': None,
         'model': None,
         'twm': None,
-        'ws_connected': False
+        'ws_connected': False,
+        'api_key': None,
+        'api_secret': None
     })
 
 # Configure page
@@ -134,22 +136,19 @@ def show_real_time_data(symbol, interval):
             price_placeholder.metric(f"Current {symbol} Price", f"${price:,.2f}")
     
     # Initialize WebSocket Manager
-    if 'twm' not in st.session_state or not st.session_state.twm:
+    if not st.session_state.ws_connected:
         st.session_state.twm = ThreadedWebsocketManager(
-            api_key=st.session_state.client.API_KEY,
-            api_secret=st.session_state.client.SECRET_KEY,
+            api_key=st.session_state.api_key,
+            api_secret=st.session_state.api_secret,
             tld='us'
         )
         st.session_state.twm.start()
-        st.session_state.ws_connected = True
-    
-    # Start socket if not already running
-    if st.session_state.ws_connected:
         st.session_state.twm.start_kline_socket(
             callback=handle_socket_message,
             symbol=symbol,
             interval=interval
         )
+        st.session_state.ws_connected = True
 
 # Main app structure
 st.title("🚀 DeepSeek Autonomous Crypto Trader")
@@ -169,8 +168,10 @@ with st.sidebar:
                 api_key=api_key,
                 api_secret=api_secret,
                 tld='us',
-                testnet=True  # Remove for live trading
+                testnet=True
             )
+            st.session_state.api_key = api_key
+            st.session_state.api_secret = api_secret
             st.success("Successfully connected to Binance US!")
         except Exception as e:
             st.error(f"Connection failed: {str(e)}")
@@ -292,7 +293,7 @@ with tab4:
                             price
                         )
                         
-                        time.sleep(60)  # Check every minute
+                        time.sleep(60)
                         
                     except Exception as e:
                         st.error(f"Trading error: {str(e)}")
@@ -306,8 +307,8 @@ with tab4:
 st.markdown("---")
 st.markdown("""
 **🔒 Security Note:**  
-- API keys are never stored or transmitted  
-- Trading sessions automatically expire after 1 hour  
-- Always test with Binance Testnet first  
-- Use at your own risk with real funds
+- API credentials are stored only in session state  
+- WebSocket connections are properly terminated  
+- All trades use testnet by default  
+- Never shares your actual API keys with anyone
 """)

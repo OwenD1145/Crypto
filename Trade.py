@@ -321,7 +321,7 @@ with tab4:
                         st.error(f"Trading error: {str(e)}")
                         st.session_state.trading_active = False
                 
-                st.session_state.trading_active = False
+                st.session_state.trading_active = True
                 st.experimental_rerun()
     else:
         st.info("Train the model first")

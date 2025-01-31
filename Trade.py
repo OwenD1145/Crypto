@@ -177,7 +177,7 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.text_input("Binance US API Key", type='password')
     api_secret = st.text_input("Binance US API Secret", type='password')
-    symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
+    symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
     interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
     
     if st.button("🔌 Connect to Exchange"):

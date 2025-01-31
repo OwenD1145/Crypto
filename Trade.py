@@ -84,18 +84,37 @@ def fetch_historical_data(client, symbol, interval, days=90):
 
 # ML model functions
 def prepare_training_data(df):
+    # Create target variable (1 if price increases, 0 otherwise)
     df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+    
+    # Remove the last row since we don't have a target for it
+    df = df[:-1]
+    
     features = df[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower']]
-    return features, df['target']
+    target = df['target']
+    
+    # Ensure no NaN values remain
+    features = features.dropna()
+    target = target[features.index]
+    
+    return features, target
 
 def train_model(features, target):
-    X_train, X_test, y_train, y_test = train_test_split(
-        features, target, test_size=0.2, shuffle=False
-    )
+    # Split data ensuring no data leakage
+    split_index = int(len(features) * 0.8)
+    X_train = features.iloc[:split_index]
+    X_test = features.iloc[split_index:]
+    y_train = target.iloc[:split_index]
+    y_test = target.iloc[split_index:]
+    
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
-    accuracy = accuracy_score(y_test, model.predict(X_test))
-    return model, accuracy
+    
+    # Calculate accuracy
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    
+    return model, accuracy, X_test, y_test
 
 # Trading functions
 def execute_trade_action(client, symbol, prediction, price):
@@ -135,7 +154,6 @@ def show_real_time_data(symbol, interval):
             price = float(candle['c'])
             price_placeholder.metric(f"Current {symbol} Price", f"${price:,.2f}")
     
-    # Initialize WebSocket Manager
     if not st.session_state.ws_connected:
         st.session_state.twm = ThreadedWebsocketManager(
             api_key=st.session_state.api_key,
@@ -217,16 +235,16 @@ with tab3:
         if st.button("Train Model"):
             with st.spinner("Training model..."):
                 features, target = prepare_training_data(st.session_state.hist_data.copy())
-                model, accuracy = train_model(features, target)
+                model, accuracy, X_test, y_test = train_model(features, target)
+                
                 if model:
                     st.session_state.model = model
                     st.success(f"Model trained (Accuracy: {accuracy:.2%})")
                     
                     # Backtesting visualization
-                    test_data = st.session_state.hist_data.iloc[int(len(features)*0.8):]
-                    predictions = model.predict(features.iloc[int(len(features)*0.8):])
+                    test_data = st.session_state.hist_data.iloc[X_test.index]
                     test_data['returns'] = np.log(test_data['close'] / test_data['close'].shift(1))
-                    test_data['strategy'] = test_data['returns'] * predictions[:-1]
+                    test_data['strategy'] = test_data['returns'] * y_test
                     
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(

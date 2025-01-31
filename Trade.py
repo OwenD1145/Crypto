@@ -19,7 +19,8 @@ if 'trading_active' not in st.session_state:
         'client': None,
         'hist_data': None,
         'model': None,
-        'twm': None
+        'twm': None,
+        'ws_connected': False
     })
 
 # Configure page
@@ -121,7 +122,7 @@ def execute_trade_action(client, symbol, prediction, price):
         return None
 
 # UI Components
-def show_real_time_data():
+def show_real_time_data(symbol, interval):
     st.header("📈 Real-Time Market Data")
     price_placeholder = st.empty()
     chart_placeholder = st.empty()
@@ -132,13 +133,18 @@ def show_real_time_data():
             price = float(candle['c'])
             price_placeholder.metric(f"Current {symbol} Price", f"${price:,.2f}")
     
-    if 'twm' not in st.session_state or not st.session_state.twm.is_alive():
+    # Initialize WebSocket Manager
+    if 'twm' not in st.session_state or not st.session_state.twm:
         st.session_state.twm = ThreadedWebsocketManager(
-            api_key=api_key,
-            api_secret=api_secret,
+            api_key=st.session_state.client.API_KEY,
+            api_secret=st.session_state.client.SECRET_KEY,
             tld='us'
         )
         st.session_state.twm.start()
+        st.session_state.ws_connected = True
+    
+    # Start socket if not already running
+    if st.session_state.ws_connected:
         st.session_state.twm.start_kline_socket(
             callback=handle_socket_message,
             symbol=symbol,
@@ -174,7 +180,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Real-Time", "History", "Model", "Trade"])
 
 with tab1:
     if st.session_state.client:
-        show_real_time_data()
+        show_real_time_data(symbol, interval)
     else:
         st.warning("Please connect to Binance US in the sidebar")
 
@@ -242,7 +248,9 @@ with tab4:
             
             if st.button("🛑 Stop Session"):
                 st.session_state.trading_active = False
-                st.session_state.twm.stop()
+                if st.session_state.twm:
+                    st.session_state.twm.stop()
+                    st.session_state.ws_connected = False
                 st.experimental_rerun()
         else:
             if st.button("Start 1-Hour Session"):

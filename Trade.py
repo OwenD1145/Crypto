@@ -183,7 +183,7 @@ with st.sidebar:
     api_secret = st.text_input("Binance US API Secret", type='password')
     symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
     interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
-    
+    st.session_state.symbol = symbol
     if st.button("🔌 Connect to Exchange"):
         try:
             st.session_state.client = Client(
@@ -194,6 +194,7 @@ with st.sidebar:
             )
             st.session_state.api_key = api_key
             st.session_state.api_secret = api_secret
+        
             st.success("Successfully connected to Binance US!")
         except Exception as e:
             st.error(f"Connection failed: {str(e)}")

@@ -184,6 +184,7 @@ with st.sidebar:
     symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
     interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
     st.session_state.symbol = symbol
+    st.session_state.interval = interval
     if st.button("🔌 Connect to Exchange"):
         try:
             st.session_state.client = Client(

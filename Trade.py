@@ -225,9 +225,7 @@ with tab2:
                         open=hist_data['open'],
                         high=hist_data['high'],
                         low=hist_data['low'],
-                        close=hist_data['close'],
-                        go.Scatter(x = hist_data.index, y = hist_data['Bollinger_Lower'], line = dict(color = 'blue', width = 1), name = "BBL"),
-                        go.Scatter(x = hist_data.index, y = hist_data['Bollinger_Upper'], line = dict(color = 'blue', width = 1), name = "BBU")
+                        close=hist_data['close']
                     )])
                     fig.update_layout(title=f"{symbol} Price History")
                     st.plotly_chart(fig, use_container_width=True)

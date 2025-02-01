@@ -1,263 +1,337 @@
-# trading_bot.py
 import streamlit as st
-from binance.client import Client
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-from ta.momentum import RSIIndicator
-from ta.trend import MACD
-from ta.volatility import BollingerBands
-import lightgbm as lgb
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix
 import time
-import warnings
+from datetime import datetime, timedelta
+from binance.client import Client
+from binance import ThreadedWebsocketManager
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import plotly.graph_objects as go
 
-warnings.filterwarnings('ignore')
+# Initialize session state
+if 'trading_active' not in st.session_state:
+    st.session_state.update({
+        'trading_active': False,
+        'start_time': None,
+        'client': None,
+        'hist_data': None,
+        'model': None,
+        'twm': None,
+        'ws_connected': False,
+        'api_key': None,
+        'api_secret': None
+    })
 
-# --- Constants ---
-RISK_PER_TRADE = 0.02  # 2% of portfolio per trade
-STOP_LOSS = 0.02  # 2% stop loss
-TAKE_PROFIT = 0.04  # 4% take profit
-MAX_RETRIES = 3
-REQUEST_DELAY = 6  # Binance rate limit: 10 requests/minute
+# Configure page
+st.set_page_config(
+    page_title="Crypto Trader",
+    page_icon="🚀",
+    layout="wide"
+)
 
-# --- Security Disclaimer ---
-st.sidebar.markdown("""
-**WARNING:** Trading carries substantial risk. 
-This application is for demonstration purposes only. 
-Never share API keys with untrusted parties.
-""")
+# Technical indicators calculations
+def compute_technical_indicators(df):
+    for col in ['open', 'high', 'low', 'close']:
+        df[col] = df[col].astype(float)
+    
+    df['SMA_20'] = df['close'].rolling(20).mean()
+    df['SMA_50'] = df['close'].rolling(50).mean()
+    df['RSI'] = compute_rsi(df['close'], 14)
+    df['MACD'] = compute_macd(df['close'])
+    df['Signal_Line'] = df['MACD'].rolling(9).mean()
+    df['Bollinger_Upper'], df['Bollinger_Lower'] = compute_bollinger_bands(df['close'])
+    return df.dropna()
 
-# --- Binance Connection ---
-def connect_binance(api_key, api_secret, testnet=True):
-    client = Client(api_key, api_secret, testnet=testnet)
+def compute_rsi(prices, window=14):
+    delta = prices.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window).mean()
+    avg_loss = loss.rolling(window).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def compute_macd(prices, fast=12, slow=26):
+    return prices.ewm(span=fast).mean() - prices.ewm(span=slow).mean()
+
+def compute_bollinger_bands(prices, window=20):
+    sma = prices.rolling(window).mean()
+    std = prices.rolling(window).std()
+    return sma + 2*std, sma - 2*std
+
+# Data fetching functions
+def fetch_historical_data(client, symbol, interval, days=90):
     try:
-        client.get_account()
-        return client
+        klines = client.get_historical_klines(
+            symbol=symbol,
+            interval=interval,
+            start_str=(datetime.now() - timedelta(days=days)).strftime('%d %b %Y %H:%M:%S')
+        )
+        df = pd.DataFrame(klines, columns=[
+            'time', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
+        df['time'] = pd.to_datetime(df['time'], unit='ms')
+        return compute_technical_indicators(df)
     except Exception as e:
-        st.error(f"Connection failed: {str(e)}")
+        st.error(f"Data fetch error: {str(e)}")
         return None
 
-# --- Data Fetching with Retries ---
-@st.cache_data(ttl=3600)
-def get_historical_data(client, symbol, interval, start_date):
-    for _ in range(MAX_RETRIES):
-        try:
-            klines = client.get_historical_klines(symbol, interval, start_date)
-            df = pd.DataFrame(klines, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_volume', 'trades', 'tb_base_volume',
-                'tb_quote_volume', 'ignore'
-            ])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
-            return df.set_index('timestamp').dropna()
-        except Exception as e:
-            time.sleep(REQUEST_DELAY)
-    st.error("Failed to fetch historical data")
-    return None
-
-# --- Technical Indicators ---
-def add_technical_indicators(df):
-    try:
-        # RSI
-        rsi = RSIIndicator(df['close'], window=14)
-        df['rsi'] = rsi.rsi()
-        
-        # MACD
-        macd = MACD(df['close'], window_slow=26, window_fast=12, window_sign=9)
-        df['macd'] = macd.macd()
-        df['macd_signal'] = macd.macd_signal()
-        
-        # Bollinger Bands
-        bb = BollingerBands(df['close'], window=20, window_dev=2)
-        df['bb_upper'] = bb.bollinger_hband()
-        df['bb_lower'] = bb.bollinger_lband()
-        
-        return df.dropna()
-    except ZeroDivisionError:
-        st.error("Error in technical indicators calculation")
-        return df
-
-# --- Model Training ---
-def train_model(df):
-    try:
-        # Create target (next hour's price movement)
-        df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
-        df.dropna(inplace=True)
-
-        X = df[['rsi', 'macd', 'bb_upper', 'bb_lower', 'volume']]
-        y = df['target']
-        
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=False
-        )
-        
-        model = lgb.LGBMClassifier(
-            num_leaves=31,
-            learning_rate=0.05,
-            n_estimators=100
-        ).fit(X_train, y_train)
-        
-        # Calculate metrics
-        predictions = model.predict(X_test)
-        accuracy = accuracy_score(y_test, predictions)
-        cm = confusion_matrix(y_test, predictions)
-        
-        return model, accuracy, cm
-    except Exception as e:
-        st.error(f"Model training failed: {str(e)}")
-        return None, None, None
-
-# --- Risk Management ---
-def calculate_position_size(client, symbol, current_price):
-    try:
-        balance = client.get_asset_balance(asset='USDT')['free']
-        portfolio_value = float(balance)
-        risk_amount = portfolio_value * RISK_PER_TRADE
-        return round(risk_amount / current_price, 5)
-    except:
-        return 0.001  # Fallback position size
-
-# --- Trade Execution ---
-def execute_trade(client, model, symbol, current_data):
-    try:
-        features = pd.DataFrame([[
-            current_data['rsi'],
-            current_data['macd'],
-            current_data['bb_upper'],
-            current_data['bb_lower'],
-            current_data['volume']
-        ]], columns=['rsi', 'macd', 'bb_upper', 'bb_lower', 'volume'])
-        
-        prediction = model.predict(features)[0]
-        price = current_data['close']
-        quantity = calculate_position_size(client, symbol, price)
-        
-        if quantity <= 0:
-            return "Insufficient funds"
-            
-        if prediction == 1:
-            order = client.create_order(
-                symbol=symbol,
-                side=Client.SIDE_BUY,
-                type=Client.ORDER_TYPE_MARKET,
-                quantity=quantity
-            )
-            return f"Bought {quantity} {symbol}"
-        else:
-            order = client.create_order(
-                symbol=symbol,
-                side=Client.SIDE_SELL,
-                type=Client.ORDER_TYPE_MARKET,
-                quantity=quantity
-            )
-            return f"Sold {quantity} {symbol}"
-    except Exception as e:
-        return f"Trade failed: {str(e)}"
-
-# --- UI Components ---
-def display_model_metrics(accuracy, cm):
-    st.subheader("Model Performance")
-    st.metric("Test Accuracy", f"{accuracy:.2%}")
+# ML model functions
+def prepare_training_data(df):
+    # Create target variable (1 if price increases, 0 otherwise)
+    df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
     
-    fig = go.Figure(data=go.Heatmap(
-        z=cm,
-        x=['Predicted 0', 'Predicted 1'],
-        y=['Actual 0', 'Actual 1'],
-        colorscale='Blues'
-    ))
-    st.plotly_chart(fig)
+    # Remove the last row since we don't have a target for it
+    df = df[:-1]
+    
+    features = df[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower']]
+    target = df['target']
+    
+    # Ensure no NaN values remain and align indices
+    valid_indices = features.dropna().index.intersection(target.index)
+    features = features.loc[valid_indices]
+    target = target.loc[valid_indices]
+    
+    return features, target
 
-def display_live_trading():
-    st.subheader("Live Trading Dashboard")
-    status_text = st.empty()
+def train_model(features, target):
+    # Split data ensuring valid indices
+    split_index = int(len(features) * 0.8)
+    train_indices = features.index[:split_index]
+    test_indices = features.index[split_index:]
+    
+    X_train = features.loc[train_indices]
+    X_test = features.loc[test_indices]
+    y_train = target.loc[train_indices]
+    y_test = target.loc[test_indices]
+    
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    # Calculate accuracy
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    
+    return model, accuracy, test_indices
+
+# Trading functions
+def execute_trade_action(client, symbol, prediction, price):
+    try:
+        if prediction == 1:  # Buy signal
+            balance = client.get_asset_balance(asset='USDT')
+            usdt_balance = float(balance['free'])
+            if usdt_balance > 10:
+                quantity = (usdt_balance * 0.99) / price
+                return client.order_market_buy(
+                    symbol=symbol,
+                    quantity=round(quantity, 5)
+                )
+        else:  # Sell signal
+            asset = symbol.replace('USDT', '')
+            balance = client.get_asset_balance(asset=asset)
+            asset_balance = float(balance['free'])
+            if asset_balance > 0:
+                return client.order_market_sell(
+                    symbol=symbol,
+                    quantity=round(asset_balance, 5)
+                )
+        return None
+    except Exception as e:
+        st.error(f"Trade error: {str(e)}")
+        return None
+
+# UI Components
+def show_real_time_data(symbol, interval):
+    st.header("📈 Real-Time Market Data")
+    price_placeholder = st.empty()
     chart_placeholder = st.empty()
-    return status_text, chart_placeholder
+    
+    def handle_socket_message(msg):
+        if msg['e'] == 'kline':
+            candle = msg['k']
+            price = float(candle['c'])
+            price_placeholder.metric(f"Current {symbol} Price", f"${price:,.2f}")
+    
+    if not st.session_state.ws_connected:
+        st.session_state.twm = ThreadedWebsocketManager(
+            api_key=st.session_state.api_key,
+            api_secret=st.session_state.api_secret,
+            tld='us'
+        )
+        st.session_state.twm.start()
+        st.session_state.twm.start_kline_socket(
+            callback=handle_socket_message,
+            symbol=symbol,
+            interval=interval
+        )
+        st.session_state.ws_connected = True
 
-# --- Main Application ---
-def main():
-    st.title("AutoBinance Trader")
+# Main app structure
+st.title("🚀 Autonomous Crypto Trader")
+st.markdown("---")
+
+# Sidebar configuration
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    api_key = st.text_input("Binance US API Key", type='password')
+    api_secret = st.text_input("Binance US API Secret", type='password')
+    symbol = st.selectbox("Trading Pair", ['BTCUSDT', 'ETHUSDT', 'ADAUSDT'])
+    interval = st.selectbox("Candle Interval", ['1m', '5m', '15m', '1h'])
     
-    # API Inputs
-    api_key = st.text_input("Binance API Key", type="password")
-    api_secret = st.text_input("Binance API Secret", type="password")
-    testnet = st.checkbox("Use Testnet", value=True)
-    
-    if api_key and api_secret:
-        client = connect_binance(api_key, api_secret, testnet=testnet)
-        if not client:
-            return
-            
-        # Asset Selection
-        symbol = st.selectbox("Trading Pair", ["BTCUSDT", "ETHUSDT", "ADAUSDT"])
-        interval = Client.KLINE_INTERVAL_1HOUR
-        
-        # Historical Data
-        df = get_historical_data(client, symbol, interval, "2020-01-01")
-        if df is not None:
-            df = add_technical_indicators(df)
-            
-            # Display Price Chart
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(
-                x=df.index,
-                open=df['open'],
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                name='Price'
-            ))
-            st.plotly_chart(fig)
-            
-            # Model Training
-            if st.button("Train Trading Model"):
-                with st.spinner("Training model..."):
-                    model, accuracy, cm = train_model(df)
-                    if model:
-                        display_model_metrics(accuracy, cm)
-                        st.session_state.model = model
-                        
-            # Live Trading Session
-            if 'model' in st.session_state and st.button("Start Live Trading (1 Hour)"):
-                status_text, chart = display_live_trading()
-                start_time = time.time()
+    if st.button("🔌 Connect to Exchange"):
+        try:
+            st.session_state.client = Client(
+                api_key=api_key,
+                api_secret=api_secret,
+                tld='us',
+                testnet=True
+            )
+            st.session_state.api_key = api_key
+            st.session_state.api_secret = api_secret
+            st.success("Successfully connected to Binance US!")
+        except Exception as e:
+            st.error(f"Connection failed: {str(e)}")
+
+# Main tabs
+tab1, tab2, tab3, tab4 = st.tabs(["Real-Time", "History", "Model", "Trade"])
+
+with tab1:
+    if st.session_state.client:
+        show_real_time_data(symbol, interval)
+    else:
+        st.warning("Please connect to Binance US in the sidebar")
+
+with tab2:
+    if st.session_state.client:
+        st.header("📊 Historical Analysis")
+        if st.button("Load Historical Data"):
+            with st.spinner("Fetching historical data..."):
+                hist_data = fetch_historical_data(
+                    st.session_state.client,
+                    symbol,
+                    interval
+                )
+                if hist_data is not None:
+                    st.session_state.hist_data = hist_data
+                    st.success(f"Loaded {len(hist_data)} records")
+                    
+                    fig = go.Figure(data=[go.Candlestick(
+                        x=hist_data['time'],
+                        open=hist_data['open'],
+                        high=hist_data['high'],
+                        low=hist_data['low'],
+                        close=hist_data['close']
+                    )])
+                    fig.update_layout(title=f"{symbol} Price History")
+                    st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Connect to Binance US first")
+
+with tab3:
+    if 'hist_data' in st.session_state:
+        st.header("🤖 Algorithm Training")
+        if st.button("Train Model"):
+            with st.spinner("Training model..."):
+                features, target = prepare_training_data(st.session_state.hist_data.copy())
+                model, accuracy, test_indices = train_model(features, target)
                 
-                while time.time() - start_time < 3600:
+                if model:
+                    st.session_state.model = model
+                    st.success(f"Model trained (Accuracy: {accuracy:.2%})")
+                    
+                    # Backtesting visualization
+                    test_data = st.session_state.hist_data.loc[test_indices]
+                    test_data['returns'] = np.log(test_data['close'] / test_data['close'].shift(1))
+                    test_data['strategy'] = test_data['returns'] * model.predict(features.loc[test_indices])
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=test_data['time'],
+                        y=test_data['strategy'].cumsum().apply(np.exp),
+                        name='Strategy'
+                    ))
+                    fig.update_layout(title="Backtest Performance")
+                    st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Load historical data first")
+
+with tab4:
+    if 'model' in st.session_state:
+        st.header("💸 Live Trading")
+        if st.session_state.trading_active:
+            st.warning("Trading session in progress")
+            progress = (datetime.now() - st.session_state.start_time).seconds / 3600
+            st.progress(min(progress, 1.0))
+            
+            if st.button("🛑 Stop Session"):
+                st.session_state.trading_active = False
+                if st.session_state.twm:
+                    st.session_state.twm.stop()
+                    st.session_state.ws_connected = False
+                st.experimental_rerun()
+        else:
+            if st.button("Start 1-Hour Session"):
+                st.session_state.trading_active = True
+                st.session_state.start_time = datetime.now()
+                
+                # Trading loop
+                while st.session_state.trading_active and \
+                     (datetime.now() - st.session_state.start_time).seconds < 3600:
+                    
                     try:
-                        # Get current data
-                        kline = client.get_klines(symbol=symbol, interval=interval, limit=1)[0]
-                        current_data = {
-                            'open': float(kline[1]),
-                            'high': float(kline[2]),
-                            'low': float(kline[3]),
-                            'close': float(kline[4]),
-                            'volume': float(kline[5]),
-                        }
-                        current_data = add_technical_indicators(
-                            pd.DataFrame([current_data], index=[pd.Timestamp.now()])
-                        ).iloc[-1].to_dict()
+                        # Get latest data
+                        klines = st.session_state.client.get_klines(
+                            symbol=symbol,
+                            interval=interval,
+                            limit=100
+                        )
+                        latest_data = pd.DataFrame(klines, columns=[
+                            'time', 'open', 'high', 'low', 'close', 'volume',
+                            'close_time', 'quote_volume', 'trades',
+                            'taker_buy_base', 'taker_buy_quote', 'ignore'
+                        ])
+                        latest_data = compute_technical_indicators(latest_data)
+                        
+                        # Make prediction
+                        features = latest_data.iloc[-1][[
+                            'SMA_20', 'SMA_50', 'RSI', 'MACD', 
+                            'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower'
+                        ]].values.reshape(1, -1)
+                        
+                        prediction = st.session_state.model.predict(features)[0]
+                        price = float(st.session_state.client.get_symbol_ticker(symbol=symbol)['price'])
                         
                         # Execute trade
-                        trade_result = execute_trade(client, st.session_state.model, symbol, current_data)
-                        status_text.write(f"{time.ctime()} | {trade_result}")
+                        execute_trade_action(
+                            st.session_state.client,
+                            symbol,
+                            prediction,
+                            price
+                        )
                         
-                        # Update chart
-                        fig.add_trace(go.Scatter(
-                            x=[pd.Timestamp.now()],
-                            y=[current_data['close']],
-                            mode='markers',
-                            marker=dict(color='red' if 'Sold' in trade_result else 'green', size=10),
-                            name='Trades'
-                        ))
-                        chart.plotly_chart(fig, use_container_width=True)
+                        time.sleep(60)
                         
-                        time.sleep(REQUEST_DELAY)
                     except Exception as e:
-                        st.error(f"Error: {str(e)}")
-                        time.sleep(REQUEST_DELAY * 2)
+                        st.error(f"Trading error: {str(e)}")
+                        st.session_state.trading_active = False
+                
+                st.session_state.trading_active = False
+                st.experimental_rerun()
+    else:
+        st.info("Train the model first")
 
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.markdown("""
+**🔒 Security Note:**  
+- API credentials are stored only in session state  
+- WebSocket connections are properly terminated  
+- All trades use testnet by default  
+- Never shares your actual API keys with anyone
+- - This tool is for educational purposes only. OD is not an experienced trader. or coder.. use at your own risk with your own funds 
+
+""")

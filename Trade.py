@@ -310,8 +310,7 @@ with tab4:
                     except Exception as e:
                         st.error(f"Trading error: {e}")
                         st.session_state.trading_active = False
-    else:
-        st.info("Train the model first")
+   
 
 st.markdown("---")
 st.markdown("""

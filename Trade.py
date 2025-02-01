@@ -189,7 +189,7 @@ with st.sidebar:
                 api_key=api_key,
                 api_secret=api_secret,
                 tld='us',
-                testnet=False
+                testnet=True
             )
             st.session_state.api_key = api_key
             st.session_state.api_secret = api_secret
@@ -257,6 +257,8 @@ with tab3:
                     ))
                     fig.update_layout(title="Backtest Performance")
                     st.plotly_chart(fig, use_container_width=True)
+
+                    test_data[:]
     else:
         st.info("Load historical data first")
 

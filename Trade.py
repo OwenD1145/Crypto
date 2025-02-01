@@ -33,7 +33,7 @@ st.set_page_config(
 )
 
 # Technical indicators calculations
-def compute_technical_indicators(df):
+def calculate_technical_indicators(df):
     for col in ['open', 'high', 'low', 'close']:
         df[col] = df[col].astype(float)
     

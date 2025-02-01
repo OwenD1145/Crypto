@@ -262,67 +262,62 @@ with tab3:
         st.info("Load historical data first")
 
 with tab4:
+    st.header("Live Trading Interface")
     if 'model' in st.session_state:
-        st.header("💸 Live Trading")
         if st.session_state.trading_active:
-            st.warning("Trading session in progress")
-            progress = (datetime.now() - st.session_state.start_time).seconds / 3600
-            st.progress(min(progress, 1.0))
+            elapsed = time.time() - st.session_state.start_time
+            progress = elapsed / TRADE_DURATION
             
-            if st.button("🛑 Stop Session"):
+            st.progress(progress)
+            st.write(f"Time remaining: {TRADE_DURATION - int(elapsed)} seconds")
+            
+            if st.button("🛑 Stop Trading Session"):
                 st.session_state.trading_active = False
-                if st.session_state.twm:
-                    st.session_state.twm.stop()
-                    st.session_state.ws_connected = False
+                if st.session_state.websocket:
+                    st.session_state.websocket.stop()
                 st.experimental_rerun()
         else:
-            if st.button("Start 1-Hour Session"):
+            if st.button("🚀 Start 1-Hour Trading Session"):
                 st.session_state.trading_active = True
-                st.session_state.start_time = datetime.now()
+                st.session_state.start_time = time.time()
                 
-                # Trading loop
                 while st.session_state.trading_active and \
-                     (datetime.now() - st.session_state.start_time).seconds < 3600:
+                    (time.time() - st.session_state.start_time < TRADE_DURATION):
                     
                     try:
-                        # Get latest data
+                        # Get latest market data
                         klines = st.session_state.client.get_klines(
-                            symbol=symbol,
-                            interval=interval,
+                            symbol=st.session_state.symbol,
+                            interval=st.session_state.interval,
                             limit=100
                         )
-                        latest_data = pd.DataFrame(klines, columns=[
-                            'time', 'open', 'high', 'low', 'close', 'volume',
+                        latest_data = pd.DataFrame(klines[-1:], columns=[
+                            'timestamp', 'open', 'high', 'low', 'close', 'volume',
                             'close_time', 'quote_volume', 'trades',
                             'taker_buy_base', 'taker_buy_quote', 'ignore'
                         ])
-                        latest_data = compute_technical_indicators(latest_data)
+                        latest_data = calculate_technical_indicators(latest_data)
                         
-                        # Make prediction
-                        features = latest_data.iloc[-1][[
-                            'SMA_20', 'SMA_50', 'RSI', 'MACD', 
-                            'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower'
-                        ]].values.reshape(1, -1)
-                        
+                        # Generate prediction
+                        features = latest_data[[
+                            'SMA_20', 'SMA_50', 'RSI', 
+                            'MACD', 'Signal',
+                            'Bollinger_Upper', 'Bollinger_Lower'
+                        ]]
                         prediction = st.session_state.model.predict(features)[0]
-                        price = float(st.session_state.client.get_symbol_ticker(symbol=symbol)['price'])
                         
                         # Execute trade
-                        execute_trade_action(
+                        execute_trade(
                             st.session_state.client,
-                            symbol,
-                            prediction,
-                            price
+                            st.session_state.symbol,
+                            prediction
                         )
                         
-                        time.sleep(60)
+                        time.sleep(60)  # Trade interval
                         
                     except Exception as e:
                         st.error(f"Trading error: {str(e)}")
                         st.session_state.trading_active = False
-                
-                st.session_state.trading_active = False
-                st.experimental_rerun()
     else:
         st.info("Train the model first")
 

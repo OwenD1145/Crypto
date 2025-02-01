@@ -296,7 +296,7 @@ with tab4:
                         latest_data = calculate_technical_indicators(latest_data)
                         
                         # Make prediction
-                        features = latest_data[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Lower', 'Bollinger_Upper']]
+                        features = latest_data[['SMA_20', 'SMA_50', 'RSI', 'MACD', 'Signal_Line', 'Bollinger_Upper', 'Bollinger_Lower']]
                         prediction = st.session_state.model.predict(features)[0]
                         
                         # Execute trade

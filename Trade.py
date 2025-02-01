@@ -189,7 +189,7 @@ with st.sidebar:
                 api_key=api_key,
                 api_secret=api_secret,
                 tld='us',
-                testnet=True
+                testnet=False
             )
             st.session_state.api_key = api_key
             st.session_state.api_secret = api_secret

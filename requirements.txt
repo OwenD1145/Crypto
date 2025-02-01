@@ -1,6 +1,8 @@
-streamlit==1.22.0
+# requirements.txt
+streamlit==1.31.1
 python-binance==1.0.19
-pandas==1.5.3
-numpy==1.23.5
-scikit-learn==1.2.0
-plotly==5.11.0
+lightgbm==4.1.0
+pandas==2.1.4
+plotly==5.18.0
+numpy==1.26.3
+ta==0.10.2

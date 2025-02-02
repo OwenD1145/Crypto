@@ -397,7 +397,7 @@ def main():
     
     symbol = st.sidebar.selectbox(
         "Trading Pair",
-        ["BTC/USD", "ETH/USD", "SOL/USD"]
+        ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     )
     
     timeframe = st.sidebar.selectbox(

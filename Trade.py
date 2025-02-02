@@ -49,6 +49,7 @@ def create_features(df, sma_short, sma_long, rsi_period):
     df['MACD'], df['MACD_signal'] = calculate_macd(df['close'])
     df['volume_ma'] = df['volume'].rolling(window=20).mean()
     df['volume_ratio'] = df['volume'] / df['volume_ma']
+    df.to_numpy()
     return df
 
 def initialize_api(api_key, api_secret):

@@ -43,142 +43,193 @@ if 'last_trade_time' not in st.session_state:
 # Technical Analysis Helper Functions
 def calculate_rsi(prices: pd.Series, periods: int = 14) -> pd.Series:
     """Calculate Relative Strength Index"""
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+    try:
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi.fillna(50)  # Fill NaN with neutral value
+    except Exception as e:
+        logger.error(f"Error calculating RSI: {str(e)}")
+        return pd.Series(index=prices.index, data=50)
 
 def calculate_macd(prices: pd.Series, slow: int = 26, fast: int = 12, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
     """Calculate MACD and Signal Line"""
-    exp1 = prices.ewm(span=fast, adjust=False).mean()
-    exp2 = prices.ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
+    try:
+        exp1 = prices.ewm(span=fast, adjust=False).mean()
+        exp2 = prices.ewm(span=slow, adjust=False).mean()
+        macd = exp1 - exp2
+        signal_line = macd.ewm(span=signal, adjust=False).mean()
+        return macd.fillna(0), signal_line.fillna(0)
+    except Exception as e:
+        logger.error(f"Error calculating MACD: {str(e)}")
+        return pd.Series(index=prices.index, data=0), pd.Series(index=prices.index, data=0)
 
 def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: float = 2) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """Calculate Bollinger Bands"""
-    middle_band = prices.rolling(window=window).mean()
-    std_dev = prices.rolling(window=window).std()
-    upper_band = middle_band + (std_dev * num_std)
-    lower_band = middle_band - (std_dev * num_std)
-    return upper_band, middle_band, lower_band
+    try:
+        middle_band = prices.rolling(window=window).mean()
+        std_dev = prices.rolling(window=window).std()
+        upper_band = middle_band + (std_dev * num_std)
+        lower_band = middle_band - (std_dev * num_std)
+        return upper_band.fillna(prices), middle_band.fillna(prices), lower_band.fillna(prices)
+    except Exception as e:
+        logger.error(f"Error calculating Bollinger Bands: {str(e)}")
+        return prices, prices, prices
 
 def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """Calculate Average True Range"""
-    tr1 = high - low
-    tr2 = abs(high - close.shift())
-    tr3 = abs(low - close.shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean()
+    try:
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+        return atr.fillna(tr)
+    except Exception as e:
+        logger.error(f"Error calculating ATR: {str(e)}")
+        return pd.Series(index=high.index, data=0)
 
 def create_features(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
     """Create technical indicators and features"""
-    features = pd.DataFrame(index=df.index)
+    try:
+        features = pd.DataFrame(index=df.index)
+        
+        # Basic price features
+        features['SMA_short'] = df['close'].rolling(window=params['sma_short']).mean()
+        features['SMA_long'] = df['close'].rolling(window=params['sma_long']).mean()
+        features['price_change'] = df['close'].pct_change()
+        features['volatility'] = df['close'].rolling(window=20).std()
+        
+        # RSI
+        features['RSI'] = calculate_rsi(df['close'], periods=params['rsi_period'])
+        
+        # MACD
+        features['MACD'], features['MACD_signal'] = calculate_macd(df['close'])
+        
+        # Bollinger Bands
+        bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df['close'])
+        features['BB_width'] = (bb_upper - bb_lower) / bb_middle
+        
+        # Volume indicators
+        features['volume_ma'] = df['volume'].rolling(window=20).mean()
+        features['volume_ratio'] = df['volume'] / features['volume_ma']
+        
+        # Additional indicators
+        features['MFI'] = ta.volume.money_flow_index(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            volume=df['volume'],
+            fillna=True
+        )
+        
+        features['ADX'] = ta.trend.adx(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            fillna=True
+        )
+        
+        # ATR ratio
+        atr = calculate_atr(df['high'], df['low'], df['close'])
+        features['ATR_ratio'] = atr / df['close']
+        
+        # Fill any remaining NaN values
+        features = features.fillna(method='ffill').fillna(method='bfill')
+        
+        return features
     
-    # Basic price features
-    features['SMA_short'] = df['close'].rolling(window=params['sma_short']).mean()
-    features['SMA_long'] = df['close'].rolling(window=params['sma_long']).mean()
-    features['price_change'] = df['close'].pct_change()
-    features['volatility'] = df['close'].rolling(window=20).std()
-    
-    # RSI
-    features['RSI'] = calculate_rsi(df['close'], periods=params['rsi_period'])
-    
-    # MACD
-    features['MACD'], features['MACD_signal'] = calculate_macd(df['close'])
-    features['MACD_hist'] = features['MACD'] - features['MACD_signal']
-    
-    # Bollinger Bands
-    bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df['close'])
-    features['BB_upper'] = bb_upper
-    features['BB_middle'] = bb_middle
-    features['BB_lower'] = bb_lower
-    features['BB_width'] = (bb_upper - bb_lower) / bb_middle
-    
-    # Volume indicators
-    features['volume_ma'] = df['volume'].rolling(window=20).mean()
-    features['volume_ratio'] = df['volume'] / features['volume_ma']
-    features['OBV'] = ta.volume.on_balance_volume(df['close'], df['volume'])
-    
-    # Momentum indicators
-    features['MFI'] = ta.volume.money_flow_index(df['high'], df['low'], df['close'], df['volume'])
-    features['ADX'] = ta.trend.adx(df['high'], df['low'], df['close'])
-    
-    # Volatility indicators
-    features['ATR'] = calculate_atr(df['high'], df['low'], df['close'])
-    features['ATR_ratio'] = features['ATR'] / df['close']
-    
-    return features
-
-def calculate_position_size(account_value: float, risk_per_trade: float, 
-                          current_price: float, stop_loss_pct: float) -> float:
-    """Calculate position size based on risk management rules"""
-    max_loss_amount = account_value * (risk_per_trade / 100)
-    stop_loss_amount = current_price * (stop_loss_pct / 100)
-    position_size = max_loss_amount / stop_loss_amount
-    return min(position_size, account_value / current_price)
-
-def calculate_stop_loss(entry_price: float, position_type: str, 
-                       stop_loss_pct: float, atr_multiple: float = 2) -> float:
-    """Calculate stop loss price based on percentage or ATR"""
-    if position_type == 'long':
-        return entry_price * (1 - stop_loss_pct / 100)
-    else:
-        return entry_price * (1 + stop_loss_pct / 100)
+    except Exception as e:
+        logger.error(f"Error in feature creation: {str(e)}")
+        st.error(f"Feature creation failed: {str(e)}")
+        return pd.DataFrame()
 def calculate_performance_metrics(returns: pd.Series) -> Dict:
     """Calculate trading performance metrics"""
-    metrics = {}
-    
-    # Basic returns metrics
-    metrics['total_return'] = (returns + 1).prod() - 1
-    metrics['annual_return'] = (1 + metrics['total_return']) ** (252 / len(returns)) - 1
-    metrics['daily_sharpe'] = np.sqrt(252) * returns.mean() / returns.std()
-    
-    # Drawdown analysis
-    cum_returns = (1 + returns).cumprod()
-    rolling_max = cum_returns.expanding().max()
-    drawdowns = cum_returns / rolling_max - 1
-    metrics['max_drawdown'] = drawdowns.min()
-    
-    # Win rate and profit metrics
-    metrics['win_rate'] = (returns > 0).sum() / len(returns)
-    metrics['profit_factor'] = abs(returns[returns > 0].sum() / returns[returns < 0].sum())
-    metrics['avg_win'] = returns[returns > 0].mean()
-    metrics['avg_loss'] = returns[returns < 0].mean()
-    
-    return metrics
+    try:
+        metrics = {}
+        
+        # Basic returns metrics
+        metrics['total_return'] = (returns + 1).prod() - 1
+        metrics['annual_return'] = (1 + metrics['total_return']) ** (252 / len(returns)) - 1
+        metrics['daily_sharpe'] = np.sqrt(252) * returns.mean() / returns.std()
+        
+        # Drawdown analysis
+        cum_returns = (1 + returns).cumprod()
+        rolling_max = cum_returns.expanding().max()
+        drawdowns = cum_returns / rolling_max - 1
+        metrics['max_drawdown'] = drawdowns.min()
+        
+        # Win rate and profit metrics
+        metrics['win_rate'] = (returns > 0).sum() / len(returns)
+        metrics['profit_factor'] = abs(returns[returns > 0].sum() / returns[returns < 0].sum())
+        metrics['avg_win'] = returns[returns > 0].mean()
+        metrics['avg_loss'] = returns[returns < 0].mean()
+        
+        return metrics
+    except Exception as e:
+        logger.error(f"Error calculating performance metrics: {str(e)}")
+        return {}
 
 def train_model(api, symbol: str, timeframe: str, start_date: str, end_date: str, 
                 model_params: Dict, feature_params: Dict) -> Tuple:
     """Train and backtest the trading model"""
     try:
+        # Convert symbol format for Alpaca (remove '/')
+        alpaca_symbol = symbol.replace('/', '')
+        
+        st.info(f"Fetching data for {alpaca_symbol}...")
+        
         # Fetch historical data
-        historical_data = api.get_crypto_bars(
-            symbol,
+        historical_bars = api.get_crypto_bars(
+            alpaca_symbol,
             timeframe,
             start=start_date,
             end=end_date
         ).df
         
+        # Reset index to make timestamp a column
+        historical_data = historical_bars.reset_index()
+        
+        if historical_data.empty:
+            st.error("No data received from API")
+            return None, None, None, None
+            
+        st.info(f"Creating features from {len(historical_data)} data points...")
+        
         # Create features
         features = create_features(historical_data, feature_params)
         
         # Define feature columns
-        feature_columns = [col for col in features.columns 
-                         if col not in ['target', 'predicted_signal', 'returns']]
+        feature_columns = [
+            'SMA_short', 'SMA_long', 'RSI', 'price_change', 'volatility',
+            'MACD', 'MACD_signal', 'volume_ratio', 'BB_width', 'MFI', 'ADX', 'ATR_ratio'
+        ]
         
-        # Create target variable
+        # Ensure all feature columns exist
+        missing_columns = [col for col in feature_columns if col not in features.columns]
+        if missing_columns:
+            st.error(f"Missing features: {missing_columns}")
+            return None, None, None, None
+        
+        # Create target variable (1 if price goes up, 0 if down)
         features['target'] = (historical_data['close'].shift(-1) > 
                             historical_data['close']).astype(int)
         
         # Remove NaN values
         features = features.dropna()
         
+        if len(features) < 100:
+            st.error("Insufficient data for training")
+            return None, None, None, None
+        
+        st.info("Training model...")
+        
         # Split data
         X = features[feature_columns]
         y = features['target']
+        
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, shuffle=False
         )
@@ -189,17 +240,34 @@ def train_model(api, symbol: str, timeframe: str, start_date: str, end_date: str
         
         # Generate predictions for backtesting
         features['predicted_signal'] = model.predict(X)
-        features['returns'] = (historical_data['close'].pct_change().shift(-1) * 
-                             features['predicted_signal'])
+        
+        # Calculate returns
+        features['returns'] = historical_data['close'].pct_change().shift(-1) * features['predicted_signal']
         
         # Calculate performance metrics
         performance_metrics = calculate_performance_metrics(features['returns'].dropna())
+        
+        st.success("Model training completed successfully!")
         
         return model, features, feature_columns, performance_metrics
     
     except Exception as e:
         logger.error(f"Error in model training: {str(e)}")
+        st.error(f"Model training failed: {str(e)}")
+        st.exception(e)
         return None, None, None, None
+
+def calculate_position_size(account_value: float, risk_per_trade: float, 
+                          current_price: float, stop_loss_pct: float) -> float:
+    """Calculate position size based on risk management rules"""
+    try:
+        max_loss_amount = account_value * (risk_per_trade / 100)
+        stop_loss_amount = current_price * (stop_loss_pct / 100)
+        position_size = max_loss_amount / stop_loss_amount
+        return min(position_size, account_value / current_price)
+    except Exception as e:
+        logger.error(f"Error calculating position size: {str(e)}")
+        return 0.0
 
 def execute_trade(api, symbol: str, side: str, quantity: float, 
                  stop_loss: float, take_profit: float = None) -> Dict:
@@ -249,21 +317,34 @@ def execute_trade(api, symbol: str, side: str, quantity: float,
         
     except Exception as e:
         logger.error(f"Error executing trade: {str(e)}")
+        st.error(f"Trade execution failed: {str(e)}")
         return None
-
-def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
+      def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
                     timeframe: str, params: Dict):
     """Main trading loop with risk management"""
     try:
-        # Get current market data
-        current_data = api.get_crypto_bars(symbol, timeframe).df
+        # Convert symbol format for Alpaca
+        alpaca_symbol = symbol.replace('/', '')
         
+        # Get current market data
+        current_data = api.get_crypto_bars(alpaca_symbol, timeframe).df
+        
+        if current_data.empty:
+            st.error("Unable to fetch current market data")
+            return None
+            
         # Create features
         features = create_features(current_data, params)
+        
+        if features.empty:
+            st.error("Failed to create features for current data")
+            return None
+            
+        # Select only required feature columns
         features = features[feature_columns].copy()
         
         # Make prediction
-        current_features = pd.DataFrame(features.iloc[-1:])
+        current_features = features.iloc[-1:].copy()
         prediction = model.predict(current_features)[0]
         
         # Get account information
@@ -272,22 +353,19 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
         
         # Get current position
         try:
-            position = api.get_position(symbol)
+            position = api.get_position(alpaca_symbol)
             current_position = {
                 'side': 'long' if float(position.qty) > 0 else 'short',
                 'quantity': abs(float(position.qty)),
                 'entry_price': float(position.avg_entry_price)
             }
-        except:
+        except Exception as e:
             current_position = None
         
         # Calculate trading signals and risk parameters
         current_price = current_data['close'].iloc[-1]
-        stop_loss_price = calculate_stop_loss(
-            current_price, 
-            'long' if prediction == 1 else 'short',
-            params['stop_loss_pct']
-        )
+        stop_loss_price = current_price * (1 - params['stop_loss_pct']/100) if prediction == 1 else \
+                         current_price * (1 + params['stop_loss_pct']/100)
         
         position_size = calculate_position_size(
             buying_power,
@@ -298,27 +376,31 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
         
         # Update display
         with placeholder.container():
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric("Current Price", f"${current_price:.2f}")
-                st.metric("Signal", "BUY" if prediction == 1 else "SELL")
-                st.metric("Position Size", f"{position_size:.4f}")
+                st.metric("Signal", "BUY" if prediction == 1 else "SELL",
+                         delta="↑" if prediction == 1 else "↓")
             
             with col2:
+                st.metric("Position Size", f"{position_size:.4f}")
                 st.metric("Stop Loss", f"${stop_loss_price:.2f}")
-                st.metric("Risk per Trade", f"{params['risk_per_trade']}%")
-                st.metric("Buying Power", f"${buying_power:.2f}")
             
-            # Display current feature values
-            st.write("Current Indicators:")
+            with col3:
+                st.metric("Buying Power", f"${buying_power:.2f}")
+                st.metric("Risk per Trade", f"{params['risk_per_trade']}%")
+            
+            # Display current indicators
+            st.subheader("Current Indicators")
             feature_df = pd.DataFrame(current_features.iloc[0]).T
-            st.dataframe(feature_df)
+            st.dataframe(feature_df.style.format("{:.2f}"))
             
             # Display current position if exists
             if current_position:
-                st.write("Current Position:")
-                st.json(current_position)
+                st.subheader("Current Position")
+                position_df = pd.DataFrame([current_position])
+                st.dataframe(position_df)
         
         return {
             'prediction': prediction,
@@ -330,7 +412,9 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
         
     except Exception as e:
         logger.error(f"Error in trading loop: {str(e)}")
+        st.error(f"Trading loop error: {str(e)}")
         return None
+
 def main():
     st.title("🤖 Crypto Trading Bot Dashboard")
     
@@ -361,12 +445,12 @@ def main():
     # Asset selection
     symbol = st.sidebar.selectbox(
         "Trading Pair",
-        ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT"]
+        ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD", "MATIC/USD"]
     )
     
     timeframe = st.sidebar.selectbox(
         "Trading Timeframe",
-        ["1MIN", "5MIN", "15MIN", "1HOUR", "1DAY"]
+        ["1Min", "5Min", "15Min", "1Hour", "1Day"]
     )
     
     # Risk Management Parameters
@@ -449,59 +533,57 @@ def main():
                             st.session_state.feature_columns = feature_columns
                             
                             # Display backtest results
-                            fig = go.Figure()
-                            fig.add_trace(go.Scatter(
-                                x=backtest_results.index,
-                                y=(1 + backtest_results['returns']).cumprod(),
-                                name='Strategy Returns'
-                            ))
-                            fig.update_layout(
-                                title='Backtest Results',
-                                xaxis_title='Date',
-                                yaxis_title='Cumulative Returns'
-                            )
-                            st.plotly_chart(fig)
-                            
-                            # Display performance metrics
-                            metrics_cols = st.columns(3)
-                            with metrics_cols[0]:
-                                st.metric(
-                                    "Total Return",
-                                    f"{performance['total_return']:.2%}"
+                            if backtest_results is not None and not backtest_results.empty:
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=backtest_results.index,
+                                    y=(1 + backtest_results['returns']).cumprod(),
+                                    name='Strategy Returns'
+                                ))
+                                fig.update_layout(
+                                    title='Backtest Results',
+                                    xaxis_title='Date',
+                                    yaxis_title='Cumulative Returns'
                                 )
-                            with metrics_cols[1]:
-                                st.metric(
-                                    "Sharpe Ratio",
-                                    f"{performance['daily_sharpe']:.2f}"
-                                )
-                            with metrics_cols[2]:
-                                st.metric(
-                                    "Max Drawdown",
-                                    f"{performance['max_drawdown']:.2%}"
-                                )
-                            
-                            # Additional metrics
-                            st.write("Detailed Performance Metrics:")
-                            metrics_df = pd.DataFrame({
-                                'Metric': [
-                                    'Win Rate',
-                                    'Profit Factor',
-                                    'Average Win',
-                                    'Average Loss',
-                                    'Annual Return'
-                                ],
-                                'Value': [
-                                    f"{performance['win_rate']:.2%}",
-                                    f"{performance['profit_factor']:.2f}",
-                                    f"{performance['avg_win']:.2%}",
-                                    f"{performance['avg_loss']:.2%}",
-                                    f"{performance['annual_return']:.2%}"
-                                ]
-                            })
-                            st.dataframe(metrics_df)
+                                st.plotly_chart(fig)
+                                
+                                if performance:
+                                    # Display performance metrics
+                                    metrics_cols = st.columns(3)
+                                    with metrics_cols[0]:
+                                        st.metric(
+                                            "Total Return",
+                                            f"{performance['total_return']:.2%}"
+                                        )
+                                    with metrics_cols[1]:
+                                        st.metric(
+                                            "Sharpe Ratio",
+                                            f"{performance['daily_sharpe']:.2f}"
+                                        )
+                                    with metrics_cols[2]:
+                                        st.metric(
+                                            "Max Drawdown",
+                                            f"{performance['max_drawdown']:.2%}"
+                                        )
+                                        
+                                    # Additional metrics
+                                    st.write("Detailed Performance Metrics:")
+                                    metrics_df = pd.DataFrame({
+                                        'Metric': ['Win Rate', 'Profit Factor', 'Avg Win', 'Avg Loss'],
+                                        'Value': [
+                                            f"{performance['win_rate']:.2%}",
+                                            f"{performance['profit_factor']:.2f}",
+                                            f"{performance['avg_win']:.2%}",
+                                            f"{performance['avg_loss']:.2%}"
+                                        ]
+                                    })
+                                    st.dataframe(metrics_df)
+                        else:
+                            st.error("Model training failed. Please check the errors above.")
                             
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"Error during model training: {str(e)}")
+                    st.exception(e)
     
     with col2:
         st.subheader("Live Trading")
@@ -548,7 +630,7 @@ def main():
                             # Enter long position
                             trade_result = execute_trade(
                                 st.session_state.api,
-                                symbol,
+                                symbol.replace('/', ''),
                                 'buy',
                                 trading_data['position_size'],
                                 trading_data['stop_loss_price'],
@@ -561,7 +643,7 @@ def main():
                             # Exit position
                             trade_result = execute_trade(
                                 st.session_state.api,
-                                symbol,
+                                symbol.replace('/', ''),
                                 'sell',
                                 current_position['quantity'],
                                 None
@@ -577,3 +659,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

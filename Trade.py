@@ -102,24 +102,46 @@ class TradingBot:
             raise
 
     def fetch_historical_data(self, symbol: str, timeframe: str, 
-                            start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """Fetch historical data from Alpaca"""
-        try:
-            bars = self.api.get_crypto_bars(
-                symbol,
-                timeframe,
-                start=start_date.strftime('%Y-%m-%d'),
-                end=end_date.strftime('%Y-%m-%d')
-            ).df
-            
-            if isinstance(bars.index, pd.MultiIndex):
-                bars = bars.loc[symbol]
-                
-            return bars
-            
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            raise
+                         start_date: datetime, end_date: datetime) -> pd.DataFrame:
+    """Fetch historical data from Alpaca"""
+    try:
+        # Ensure we're not requesting future data
+        current_time = datetime.now()
+        if end_date > current_time:
+            end_date = current_time
+        
+        # Adjust start_date to ensure we're requesting valid historical data
+        if start_date > current_time:
+            start_date = current_time - timedelta(days=30)  # Default to last 30 days
+        
+        # Format dates for Alpaca API
+        start_str = start_date.strftime('%Y-%m-%d')
+        end_str = end_date.strftime('%Y-%m-%d')
+        
+        logger.info(f"Fetching data for {symbol} from {start_str} to {end_str}")
+        
+        # Get historical data
+        bars = self.api.get_crypto_bars(
+            symbol,
+            timeframe,
+            start=start_str,
+            end=end_str
+        ).df
+        
+        # Handle multi-level index if present
+        if isinstance(bars.index, pd.MultiIndex):
+            bars = bars.loc[symbol]
+        
+        # Verify we have data
+        if bars.empty:
+            raise ValueError("No data received from API")
+        
+        logger.info(f"Received {len(bars)} bars of data")
+        return bars
+        
+    except Exception as e:
+        logger.error(f"Error fetching historical data: {e}")
+        raise
 
     def train_model(self, df: pd.DataFrame, features: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, pd.Series]:
         """Train the trading model with cross-validation"""
@@ -453,20 +475,38 @@ def main():
         st.subheader("Model Training and Backtesting")
         
         if st.button("Train Model"):
-            if st.session_state.bot.api is None:
-                st.error("Please configure API credentials first")
-            else:
-                try:
-                    with st.spinner("Fetching historical data..."):
-                        end_date = datetime.now()
-                        start_date = end_date - timedelta(days=lookback_days)
-                        
-                        df = st.session_state.bot.fetch_historical_data(
-                            symbol,
-                            timeframe,
-                            start_date,
-                            end_date
-                        )
+    if st.session_state.bot.api is None:
+        st.error("Please configure API credentials first")
+    else:
+        try:
+            with st.spinner("Fetching historical data..."):
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=lookback_days)
+                
+                # Convert symbol format
+                alpaca_symbol = symbol.replace("/", "")
+                
+                df = st.session_state.bot.fetch_historical_data(
+                    alpaca_symbol,
+                    timeframe,
+                    start_date,
+                    end_date
+                )
+                
+                if df.empty:
+                    st.error("No data received from API")
+                    return
+                
+                st.info(f"Fetched {len(df)} bars of historical data")
+                
+                # Continue with feature creation and model training
+                with st.spinner("Creating features..."):
+                    features = st.session_state.bot.create_features(df)
+                
+                with st.spinner("Training model..."):
+                    metrics, features_df, target = st.session_state.bot.train_model(
+                        df, features
+                    )
                     
                     with st.spinner("Creating features..."):
                         features = st.session_state.bot.create_features(df)

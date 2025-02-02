@@ -319,8 +319,8 @@ def execute_trade(api, symbol: str, side: str, quantity: float,
         logger.error(f"Error executing trade: {str(e)}")
         st.error(f"Trade execution failed: {str(e)}")
         return None
-      def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
-                    timeframe: str, params: Dict):
+    def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
+                   timeframe: str, params: Dict):
     """Main trading loop with risk management"""
     try:
         # Convert symbol format for Alpaca

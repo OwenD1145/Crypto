@@ -225,7 +225,7 @@ def main():
                             st.metric("Model Accuracy", f"{accuracy:.2%}")
                         with metrics_col2:
                             total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
-                            st.metric("Total Returns", f"{total_returns:.2%}")
+                            st.metric("Total Returns", f"{total_returns:.2f}")
                         with metrics_col3:
                             sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
                                                    / backtest_results['strategy_returns'].std())
@@ -294,7 +294,7 @@ def main():
                             st.metric("Current Price", 
                                     f"${current_data['close'].iloc[-1]:.2f}")
                             st.metric("Trading Signal",
-                                    (f"Buy order at {datetime.now()}") if prediction == 1 else (f"Sell order at {datetime.now()}"))
+                                    (f"Buy") if prediction == 1 else (f"Sell"))
                             st.metric("Last Updated",
                                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                         

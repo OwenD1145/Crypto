@@ -462,7 +462,7 @@ def main():
                         start_date = end_date - timedelta(days=lookback_days)
                         
                         df = st.session_state.bot.fetch_historical_data(
-                            symbol.replace("/", ""),
+                            symbol,
                             timeframe,
                             start_date,
                             end_date
@@ -560,7 +560,7 @@ def main():
                     try:
                         # Get current market data
                         current_data = st.session_state.bot.fetch_historical_data(
-                            symbol.replace("/", ""),
+                            symbol,
                             timeframe,
                             datetime.now() - timedelta(hours=2),
                             datetime.now()
@@ -583,7 +583,7 @@ def main():
                         # Get current position
                         try:
                             position = st.session_state.bot.api.get_position(
-                                symbol.replace("/", ""))
+                                symbol)
                             has_position = True
                         except:
                             has_position = False
@@ -637,7 +637,7 @@ def main():
                                     
                                     # Execute buy order
                                     trade_result = st.session_state.bot.execute_trade(
-                                        symbol.replace("/", ""),
+                                        symbol,
                                         'buy',
                                         position_size,
                                         stop_loss_pct,
@@ -653,7 +653,7 @@ def main():
                                 elif prediction[0] == 0 and has_position:
                                     # Execute sell order
                                     trade_result = st.session_state.bot.execute_trade(
-                                        symbol.replace("/", ""),
+                                        symbol,
                                         'sell',
                                         float(position.qty),
                                         stop_loss_pct,

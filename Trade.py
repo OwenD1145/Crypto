@@ -281,7 +281,7 @@ def main():
                                 )
                         else:  # Predicted price decrease
                             try:
-                                position = current_data.iloc[-1]
+                                position = st.session_state.api.get_position(symbol)
                                 st.session_state.api.submit_order(
                                     symbol,
                                     qty=position_size,

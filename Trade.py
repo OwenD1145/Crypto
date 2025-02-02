@@ -331,13 +331,20 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
                     timeframe: str, params: Dict):
     """Main trading loop with risk management"""
     try:
-  
+        # Get current market data
+        current_data = api.get_crypto_bars(symbol, timeframe).df
         
-        # Get current market data - Modified to handle data correctly
-        current_data = api.get_crypto_bars(
-            [symbol],  # Alpaca expects a list of symbols
-            timeframe
-        ).df
+        # Create features
+        features = create_features(current_data, params)
+        features = features[feature_columns].copy()
+        
+        # Make prediction
+        current_features = pd.DataFrame(features.iloc[-1:])
+        prediction = model.predict(current_features)[0]
+        
+        # Get account information
+        account = api.get_account()
+        buying_power = float(account.buying_power)
         
         # Handle multi-level index
         if isinstance(current_data.index, pd.MultiIndex):

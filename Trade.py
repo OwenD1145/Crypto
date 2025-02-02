@@ -256,15 +256,28 @@ def main():
                             current_data, st.session_state.sma_short, st.session_state.sma_long, st.session_state.rsi_period
                         )
                             
-                            
+                     
+                        current_data = current_data.dropna()
+                    
+                        # Create target variable
+                        current_data['target'] = (current_data['close'].shift(-1) > current_data['close']).astype(int)
+                    
+                        # Prepare features for training
+                        feature_columns = [
+                            'SMA_short', 'SMA_long', 'RSI', 'price_change', 'volatility',
+                            'MACD', 'MACD_signal', 'volume_ratio'
+                        ]
+                        
+                        
+                        
                             
                            
                                            
                        
         
-                        # Make prediction
-                        current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
-                        prediction = st.session_state.model.predict(current_features)[0]
+                        # Make prediction current_features
+                        X = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
+                        prediction = st.session_state.model.predict(X)[0]
 
                         if prediction == 1:  # Predicted price increase
                             try:

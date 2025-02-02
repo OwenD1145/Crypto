@@ -221,7 +221,7 @@ def main():
                         metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
                         
                         with metrics_col1:
-                            st.metric("Model Accuracy", f"{model.score(X_test, y_test):.2%}")
+                            st.metric("Model Accuracy", f"{model.score:.2%}")
                         with metrics_col2:
                             total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
                             st.metric(f"Total Returns: {total_returns:.2%}")

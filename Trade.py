@@ -129,7 +129,7 @@ def main():
 
     # Trading Parameters
     st.sidebar.subheader("Trading Parameters")
-    position_size = st.sidebar.number_input("Position Size (USDT)", .01, 100, 1.0)
+    position_size = st.sidebar.number_input("Position Size (USDT)", .01, 10.00, 1.00)
     timeframe = st.sidebar.selectbox("Trading Timeframe", 
                                    ["1Min", "5Min", "15Min", "1Hour", "1Day"])
   

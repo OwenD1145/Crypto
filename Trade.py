@@ -1,384 +1,250 @@
+# pandas>=1.3.0
+# plotly>=5.3.0
+# scikit-learn>=1.0.0
+# streamlit>=1.22.0
+# Pillow>=9.0.0
+# python-dateutil>=2.8.2
+# pytz>=2023.3
+# matplotlib>=3.5.0
+
+
+
+
+
 import streamlit as st
 import alpaca_trade_api as tradeapi
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import time
 import plotly.graph_objects as go
 import plotly.express as px
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, TimeSeriesSplit
-from sklearn.metrics import accuracy_score, classification_report
+from PIL import Image
 import ta
 import logging
 from typing import Dict, Tuple, List
-import time
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO,
+                   format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Page configuration
+# Page config
 st.set_page_config(
     page_title="Crypto Trading Bot",
     page_icon="📈",
     layout="wide"
 )
 
-class TradingBot:
-    def __init__(self):
-        self.api = None
-        self.model = None
-        self.feature_columns = None
-        self.scaler = None
-        
-    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create technical indicators for trading"""
-        try:
-            features = pd.DataFrame(index=df.index)
-            
-            # Basic price features
-            features['returns'] = df['close'].pct_change()
-            features['log_returns'] = np.log1p(features['returns'])
-            
-            # Moving averages
-            for window in [5, 10, 20, 50, 100]:
-                features[f'SMA_{window}'] = ta.trend.sma_indicator(df['close'], window=window)
-                features[f'EMA_{window}'] = ta.trend.ema_indicator(df['close'], window=window)
-                
-                # Moving average crossovers
-                if window in [10, 20, 50]:
-                    features[f'SMA_cross_{window}'] = (
-                        features[f'SMA_5'] > features[f'SMA_{window}']).astype(int)
-            
-            # RSI
-            features['RSI'] = ta.momentum.rsi(df['close'])
-            features['RSI_MA'] = ta.trend.sma_indicator(features['RSI'], window=14)
-            
-            # MACD
-            macd = ta.trend.MACD(df['close'])
-            features['MACD'] = macd.macd()
-            features['MACD_signal'] = macd.macd_signal()
-            features['MACD_diff'] = macd.macd_diff()
-            features['MACD_cross'] = (features['MACD'] > features['MACD_signal']).astype(int)
-            
-            # Volume indicators
-            features['volume_sma'] = ta.trend.sma_indicator(df['volume'], window=20)
-            features['volume_ratio'] = df['volume'] / features['volume_sma']
-            features['OBV'] = ta.volume.on_balance_volume(df['close'], df['volume'])
-            
-            # Volatility
-            features['volatility'] = df['close'].rolling(window=20).std()
-            features['volatility_ratio'] = features['volatility'] / features['volatility'].rolling(window=20).mean()
-            
-            # Momentum
-            features['ROC'] = ta.momentum.roc(df['close'])
-            features['MFI'] = ta.volume.money_flow_index(df['high'], df['low'], df['close'], df['volume'])
-            
-            # Bollinger Bands
-            bb = ta.volatility.BollingerBands(df['close'])
-            features['BB_upper'] = bb.bollinger_hband()
-            features['BB_lower'] = bb.bollinger_lband()
-            features['BB_width'] = (features['BB_upper'] - features['BB_lower']) / bb.bollinger_mavg()
-            features['BB_position'] = (df['close'] - features['BB_lower']) / (features['BB_upper'] - features['BB_lower'])
-            
-            # Additional indicators
-            features['ADX'] = ta.trend.adx(df['high'], df['low'], df['close'])
-            features['CCI'] = ta.trend.cci(df['high'], df['low'], df['close'])
-            
-            # Price patterns
-            features['higher_high'] = (df['high'] > df['high'].shift(1)).astype(int)
-            features['lower_low'] = (df['low'] < df['low'].shift(1)).astype(int)
-            
-            # Fill NaN values
-            features = features.fillna(method='bfill').fillna(method='ffill')
-            
-            return features
-            
-        except Exception as e:
-            logger.error(f"Error creating features: {e}")
-            raise
+# Initialize session states
+if 'api' not in st.session_state:
+    st.session_state.api = None
+if 'model' not in st.session_state:
+    st.session_state.model = None
+if 'feature_columns' not in st.session_state:
+    st.session_state.feature_columns = None
+if 'running' not in st.session_state:
+    st.session_state.running = False
+if 'position' not in st.session_state:
+    st.session_state.position = None
+if 'last_trade_time' not in st.session_state:
+    st.session_state.last_trade_time = None
 
-def fetch_historical_data(self, symbol: str, timeframe: str, 
-                         start_date: datetime, end_date: datetime) -> pd.DataFrame:
-    """Fetch historical data from Alpaca"""
+# Technical Analysis Helper Functions
+def calculate_rsi(prices: pd.Series, periods: int = 14) -> pd.Series:
+    """Calculate Relative Strength Index"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_macd(prices: pd.Series, slow: int = 26, fast: int = 12, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
+    """Calculate MACD and Signal Line"""
+    exp1 = prices.ewm(span=fast, adjust=False).mean()
+    exp2 = prices.ewm(span=slow, adjust=False).mean()
+    macd = exp1 - exp2
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    return macd, signal_line
+
+def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: float = 2) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Calculate Bollinger Bands"""
+    middle_band = prices.rolling(window=window).mean()
+    std_dev = prices.rolling(window=window).std()
+    upper_band = middle_band + (std_dev * num_std)
+    lower_band = middle_band - (std_dev * num_std)
+    return upper_band, middle_band, lower_band
+
+def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate Average True Range"""
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(window=period).mean()
+
+def create_features(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
+    """Create technical indicators and features"""
+    features = pd.DataFrame(index=df.index)
+    
+    # Basic price features
+    features['SMA_short'] = df['close'].rolling(window=params['sma_short']).mean()
+    features['SMA_long'] = df['close'].rolling(window=params['sma_long']).mean()
+    features['price_change'] = df['close'].pct_change()
+    features['volatility'] = df['close'].rolling(window=20).std()
+    
+    # RSI
+    features['RSI'] = calculate_rsi(df['close'], periods=params['rsi_period'])
+    
+    # MACD
+    features['MACD'], features['MACD_signal'] = calculate_macd(df['close'])
+    features['MACD_hist'] = features['MACD'] - features['MACD_signal']
+    
+    # Bollinger Bands
+    bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df['close'])
+    features['BB_upper'] = bb_upper
+    features['BB_middle'] = bb_middle
+    features['BB_lower'] = bb_lower
+    features['BB_width'] = (bb_upper - bb_lower) / bb_middle
+    
+    # Volume indicators
+    features['volume_ma'] = df['volume'].rolling(window=20).mean()
+    features['volume_ratio'] = df['volume'] / features['volume_ma']
+    features['OBV'] = ta.volume.on_balance_volume(df['close'], df['volume'])
+    
+    # Momentum indicators
+    features['MFI'] = ta.volume.money_flow_index(df['high'], df['low'], df['close'], df['volume'])
+    features['ADX'] = ta.trend.adx(df['high'], df['low'], df['close'])
+    
+    # Volatility indicators
+    features['ATR'] = calculate_atr(df['high'], df['low'], df['close'])
+    features['ATR_ratio'] = features['ATR'] / df['close']
+    
+    return features
+
+def calculate_position_size(account_value: float, risk_per_trade: float, 
+                          current_price: float, stop_loss_pct: float) -> float:
+    """Calculate position size based on risk management rules"""
+    max_loss_amount = account_value * (risk_per_trade / 100)
+    stop_loss_amount = current_price * (stop_loss_pct / 100)
+    position_size = max_loss_amount / stop_loss_amount
+    return min(position_size, account_value / current_price)
+
+def calculate_stop_loss(entry_price: float, position_type: str, 
+                       stop_loss_pct: float, atr_multiple: float = 2) -> float:
+    """Calculate stop loss price based on percentage or ATR"""
+    if position_type == 'long':
+        return entry_price * (1 - stop_loss_pct / 100)
+    else:
+        return entry_price * (1 + stop_loss_pct / 100)
+def calculate_performance_metrics(returns: pd.Series) -> Dict:
+    """Calculate trading performance metrics"""
+    metrics = {}
+    
+    # Basic returns metrics
+    metrics['total_return'] = (returns + 1).prod() - 1
+    metrics['annual_return'] = (1 + metrics['total_return']) ** (252 / len(returns)) - 1
+    metrics['daily_sharpe'] = np.sqrt(252) * returns.mean() / returns.std()
+    
+    # Drawdown analysis
+    cum_returns = (1 + returns).cumprod()
+    rolling_max = cum_returns.expanding().max()
+    drawdowns = cum_returns / rolling_max - 1
+    metrics['max_drawdown'] = drawdowns.min()
+    
+    # Win rate and profit metrics
+    metrics['win_rate'] = (returns > 0).sum() / len(returns)
+    metrics['profit_factor'] = abs(returns[returns > 0].sum() / returns[returns < 0].sum())
+    metrics['avg_win'] = returns[returns > 0].mean()
+    metrics['avg_loss'] = returns[returns < 0].mean()
+    
+    return metrics
+
+def train_model(api, symbol: str, timeframe: str, start_date: str, end_date: str, 
+                model_params: Dict, feature_params: Dict) -> Tuple:
+    """Train and backtest the trading model"""
     try:
-        # Ensure we're not requesting future data
-        current_time = datetime.now()
-        if end_date > current_time:
-            end_date = current_time
-        
-        # Adjust start_date to ensure we're requesting valid historical data
-        if start_date > current_time:
-            start_date = current_time - timedelta(days=30)  # Default to last 30 days
-        
-        # Format dates for Alpaca API
-        start_str = start_date.strftime('%Y-%m-%d')
-        end_str = end_date.strftime('%Y-%m-%d')
-        
-        logger.info(f"Fetching data for {symbol} from {start_str} to {end_str}")
-        
-        # Get historical data
-        bars = self.api.get_crypto_bars(
+        # Fetch historical data
+        historical_data = api.get_crypto_bars(
             symbol,
             timeframe,
-            start=start_str,
-            end=end_str
+            start=start_date,
+            end=end_date
         ).df
         
-        # Handle multi-level index if present
-        if isinstance(bars.index, pd.MultiIndex):
-            bars = bars.loc[symbol]
+        # Create features
+        features = create_features(historical_data, feature_params)
         
-        # Verify we have data
-        if bars.empty:
-            raise ValueError("No data received from API")
+        # Define feature columns
+        feature_columns = [col for col in features.columns 
+                         if col not in ['target', 'predicted_signal', 'returns']]
         
-        logger.info(f"Received {len(bars)} bars of data")
-        return bars
+        # Create target variable
+        features['target'] = (historical_data['close'].shift(-1) > 
+                            historical_data['close']).astype(int)
         
+        # Remove NaN values
+        features = features.dropna()
+        
+        # Split data
+        X = features[feature_columns]
+        y = features['target']
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, shuffle=False
+        )
+        
+        # Train model
+        model = RandomForestClassifier(**model_params)
+        model.fit(X_train, y_train)
+        
+        # Generate predictions for backtesting
+        features['predicted_signal'] = model.predict(X)
+        features['returns'] = (historical_data['close'].pct_change().shift(-1) * 
+                             features['predicted_signal'])
+        
+        # Calculate performance metrics
+        performance_metrics = calculate_performance_metrics(features['returns'].dropna())
+        
+        return model, features, feature_columns, performance_metrics
+    
     except Exception as e:
-        logger.error(f"Error fetching historical data: {e}")
-        raise
+        logger.error(f"Error in model training: {str(e)}")
+        return None, None, None, None
 
+def execute_trade(api, symbol: str, side: str, quantity: float, 
+                 stop_loss: float, take_profit: float = None) -> Dict:
+    """Execute trade with stop loss and take profit"""
+    try:
+        # Submit main order
+        order = api.submit_order(
+            symbol=symbol,
+            qty=quantity,
+            side=side,
+            type='market',
+            time_in_force='gtc'
+        )
         
-        # Handle multi-level index if present
-        if isinstance(bars.index, pd.MultiIndex):
-            bars = bars.loc[symbol]
+        # Wait for fill
+        filled_order = api.get_order(order.id)
+        fill_price = float(filled_order.filled_avg_price)
         
-        # Verify we have data
-        if bars.empty:
-            raise ValueError("No data received from API")
+        # Submit stop loss order
+        stop_loss_order = api.submit_order(
+            symbol=symbol,
+            qty=quantity,
+            side='sell' if side == 'buy' else 'buy',
+            type='stop',
+            stop_price=stop_loss,
+            time_in_force='gtc'
+        )
         
-        logger.info(f"Received {len(bars)} bars of data")
-        return bars
-        
-    except Exception as e:
-        logger.error(f"Error fetching historical data: {e}")
-        raise
-
-    def train_model(self, df: pd.DataFrame, features: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, pd.Series]:
-        """Train the trading model with cross-validation"""
-        try:
-            # Create target variable (1 for price increase, 0 for decrease)
-            target = (df['close'].shift(-1) > df['close']).astype(int)
-            
-            # Remove NaN values
-            features = features.dropna()
-            target = target.dropna()
-            
-            # Align features and target
-            features = features.loc[target.index]
-            
-            # Store feature columns
-            self.feature_columns = features.columns.tolist()
-            
-            # Perform time series cross-validation
-            tscv = TimeSeriesSplit(n_splits=5)
-            cv_scores = []
-            
-            for train_idx, test_idx in tscv.split(features):
-                X_train = features.iloc[train_idx]
-                X_test = features.iloc[test_idx]
-                y_train = target.iloc[train_idx]
-                y_test = target.iloc[test_idx]
-                
-                model = RandomForestClassifier(
-                    n_estimators=100,
-                    min_samples_split=50,
-                    max_depth=10,
-                    random_state=42
-                )
-                
-                model.fit(X_train, y_train)
-                cv_scores.append(accuracy_score(y_test, model.predict(X_test)))
-            
-            # Train final model on all data
-            self.model = RandomForestClassifier(
-                n_estimators=100,
-                min_samples_split=50,
-                max_depth=10,
-                random_state=42
-            )
-            self.model.fit(features, target)
-            
-            # Calculate metrics
-            predictions = self.model.predict(features)
-            metrics = {
-                'accuracy': accuracy_score(target, predictions),
-                'cv_scores': cv_scores,
-                'cv_mean': np.mean(cv_scores),
-                'cv_std': np.std(cv_scores),
-                'feature_importance': dict(zip(features.columns, 
-                                            self.model.feature_importances_))
-            }
-            
-            return metrics, features, target
-            
-        except Exception as e:
-            logger.error(f"Error training model: {e}")
-            raise
-    def calculate_performance_metrics(self, df: pd.DataFrame, predictions: np.ndarray) -> Dict:
-        """Calculate trading performance metrics"""
-        try:
-            # Calculate returns based on predictions
-            df = df.copy()
-            df['strategy_returns'] = df['returns'].shift(-1) * predictions
-            df['cumulative_returns'] = (1 + df['strategy_returns']).cumprod()
-            
-            # Calculate metrics
-            total_return = df['cumulative_returns'].iloc[-1] - 1
-            annual_return = (1 + total_return) ** (252 / len(df)) - 1
-            
-            # Risk metrics
-            daily_returns = df['strategy_returns'].mean() * 252
-            daily_vol = df['strategy_returns'].std() * np.sqrt(252)
-            sharpe_ratio = daily_returns / daily_vol if daily_vol != 0 else 0
-            
-            # Drawdown analysis
-            rolling_max = df['cumulative_returns'].expanding().max()
-            drawdowns = df['cumulative_returns'] / rolling_max - 1
-            max_drawdown = drawdowns.min()
-            
-            # Win rate
-            winning_trades = (df['strategy_returns'] > 0).sum()
-            total_trades = (~df['strategy_returns'].isna()).sum()
-            win_rate = winning_trades / total_trades if total_trades > 0 else 0
-            
-            # Profit factor
-            gross_profits = df['strategy_returns'][df['strategy_returns'] > 0].sum()
-            gross_losses = abs(df['strategy_returns'][df['strategy_returns'] < 0].sum())
-            profit_factor = gross_profits / gross_losses if gross_losses != 0 else float('inf')
-            
-            return {
-                'total_return': total_return,
-                'annual_return': annual_return,
-                'sharpe_ratio': sharpe_ratio,
-                'max_drawdown': max_drawdown,
-                'win_rate': win_rate,
-                'profit_factor': profit_factor,
-                'total_trades': total_trades
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating performance metrics: {e}")
-            raise
-
-    def plot_results(self, df: pd.DataFrame, metrics: Dict) -> Tuple[go.Figure, go.Figure, go.Figure]:
-        """Create visualization plots"""
-        try:
-            # Returns plot
-            fig_returns = go.Figure()
-            fig_returns.add_trace(go.Scatter(
-                x=df.index,
-                y=df['cumulative_returns'],
-                name='Strategy Returns',
-                line=dict(color='blue')
-            ))
-            fig_returns.update_layout(
-                title='Cumulative Returns',
-                xaxis_title='Date',
-                yaxis_title='Returns',
-                hovermode='x unified'
-            )
-            
-            # Feature importance plot
-            importance_df = pd.DataFrame({
-                'Feature': list(metrics['feature_importance'].keys()),
-                'Importance': list(metrics['feature_importance'].values())
-            }).sort_values('Importance', ascending=True)
-            
-            fig_importance = px.bar(
-                importance_df.tail(15),  # Show top 15 features
-                x='Importance',
-                y='Feature',
-                orientation='h',
-                title='Top Feature Importance'
-            )
-            
-            # Drawdown plot
-            rolling_max = df['cumulative_returns'].expanding().max()
-            drawdowns = df['cumulative_returns'] / rolling_max - 1
-            
-            fig_drawdown = go.Figure()
-            fig_drawdown.add_trace(go.Scatter(
-                x=df.index,
-                y=drawdowns,
-                fill='tozeroy',
-                name='Drawdown',
-                line=dict(color='red')
-            ))
-            fig_drawdown.update_layout(
-                title='Drawdown Analysis',
-                xaxis_title='Date',
-                yaxis_title='Drawdown',
-                hovermode='x unified'
-            )
-            
-            return fig_returns, fig_importance, fig_drawdown
-            
-        except Exception as e:
-            logger.error(f"Error plotting results: {e}")
-            raise
-
-    def calculate_position_size(self, account_value: float, confidence: float, 
-                              current_price: float) -> float:
-        """Calculate position size based on confidence and risk management"""
-        try:
-            # Base position size on account value and confidence
-            base_risk = 0.02  # 2% risk per trade
-            position_risk = base_risk * confidence  # Adjust risk based on confidence
-            
-            # Calculate maximum position size
-            max_position_value = account_value * position_risk
-            position_size = max_position_value / current_price
-            
-            return position_size
-            
-        except Exception as e:
-            logger.error(f"Error calculating position size: {e}")
-            raise
-
-    def execute_trade(self, symbol: str, side: str, quantity: float, 
-                     stop_loss_pct: float, take_profit_pct: float) -> Dict:
-        """Execute trade with stop loss and take profit orders"""
-        try:
-            # Get current price
-            current_price = float(self.api.get_latest_trade(symbol).price)
-            
-            # Calculate stop loss and take profit prices
-            stop_loss = current_price * (1 - stop_loss_pct) if side == 'buy' else \
-                       current_price * (1 + stop_loss_pct)
-            take_profit = current_price * (1 + take_profit_pct) if side == 'buy' else \
-                         current_price * (1 - take_profit_pct)
-            
-            # Submit main order
-            order = self.api.submit_order(
-                symbol=symbol,
-                qty=quantity,
-                side=side,
-                type='market',
-                time_in_force='gtc'
-            )
-            
-            # Wait for fill
-            filled_order = self.api.get_order(order.id)
-            fill_price = float(filled_order.filled_avg_price)
-            
-            # Submit stop loss order
-            stop_loss_order = self.api.submit_order(
-                symbol=symbol,
-                qty=quantity,
-                side='sell' if side == 'buy' else 'buy',
-                type='stop',
-                stop_price=stop_loss,
-                time_in_force='gtc'
-            )
-            
-            # Submit take profit order
-            take_profit_order = self.api.submit_order(
+        # Submit take profit order if specified
+        take_profit_order = None
+        if take_profit:
+            take_profit_order = api.submit_order(
                 symbol=symbol,
                 qty=quantity,
                 side='sell' if side == 'buy' else 'buy',
@@ -386,381 +252,341 @@ def fetch_historical_data(self, symbol: str, timeframe: str,
                 limit_price=take_profit,
                 time_in_force='gtc'
             )
-            
-            return {
-                'main_order': order,
-                'stop_loss_order': stop_loss_order,
-                'take_profit_order': take_profit_order,
-                'fill_price': fill_price
-            }
-            
-        except Exception as e:
-            logger.error(f"Error executing trade: {e}")
-            raise
+        
+        return {
+            'main_order': order,
+            'stop_loss_order': stop_loss_order,
+            'take_profit_order': take_profit_order,
+            'fill_price': fill_price
+        }
+        
+    except Exception as e:
+        logger.error(f"Error executing trade: {str(e)}")
+        return None
 
-def initialize_session_state():
-    """Initialize session state variables"""
-    if 'bot' not in st.session_state:
-        st.session_state.bot = TradingBot()
-    if 'running' not in st.session_state:
-        st.session_state.running = False
+def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
+                    timeframe: str, params: Dict):
+    """Main trading loop with risk management"""
+    try:
+        # Get current market data
+        current_data = api.get_crypto_bars(symbol, timeframe).df
+        
+        # Create features
+        features = create_features(current_data, params)
+        features = features[feature_columns].copy()
+        
+        # Make prediction
+        current_features = pd.DataFrame(features.iloc[-1:])
+        prediction = model.predict(current_features)[0]
+        
+        # Get account information
+        account = api.get_account()
+        buying_power = float(account.buying_power)
+        
+        # Get current position
+        try:
+            position = api.get_position(symbol)
+            current_position = {
+                'side': 'long' if float(position.qty) > 0 else 'short',
+                'quantity': abs(float(position.qty)),
+                'entry_price': float(position.avg_entry_price)
+            }
+        except:
+            current_position = None
+        
+        # Calculate trading signals and risk parameters
+        current_price = current_data['close'].iloc[-1]
+        stop_loss_price = calculate_stop_loss(
+            current_price, 
+            'long' if prediction == 1 else 'short',
+            params['stop_loss_pct']
+        )
+        
+        position_size = calculate_position_size(
+            buying_power,
+            params['risk_per_trade'],
+            current_price,
+            params['stop_loss_pct']
+        )
+        
+        # Update display
+        with placeholder.container():
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Current Price", f"${current_price:.2f}")
+                st.metric("Signal", "BUY" if prediction == 1 else "SELL")
+                st.metric("Position Size", f"{position_size:.4f}")
+            
+            with col2:
+                st.metric("Stop Loss", f"${stop_loss_price:.2f}")
+                st.metric("Risk per Trade", f"{params['risk_per_trade']}%")
+                st.metric("Buying Power", f"${buying_power:.2f}")
+            
+            # Display current feature values
+            st.write("Current Indicators:")
+            feature_df = pd.DataFrame(current_features.iloc[0]).T
+            st.dataframe(feature_df)
+            
+            # Display current position if exists
+            if current_position:
+                st.write("Current Position:")
+                st.json(current_position)
+        
+        return {
+            'prediction': prediction,
+            'current_price': current_price,
+            'stop_loss_price': stop_loss_price,
+            'position_size': position_size,
+            'current_position': current_position
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in trading loop: {str(e)}")
+        return None
 def main():
-    st.title("🤖 Advanced Crypto Trading Bot")
-    
-    # Initialize session state
-    initialize_session_state()
+    st.title("🤖 Crypto Trading Bot Dashboard")
     
     # Sidebar configuration
     st.sidebar.header("Configuration")
     
     # API Configuration
+    st.sidebar.subheader("API Settings")
     api_key = st.sidebar.text_input("Alpaca API Key", type="password")
     api_secret = st.sidebar.text_input("Alpaca API Secret", type="password")
     
+    # Initialize API if credentials are provided
     if api_key and api_secret:
-        if st.session_state.bot.api is None:
+        if st.session_state.api is None:
             try:
-                st.session_state.bot.api = tradeapi.REST(
-                    api_key,
-                    api_secret,
-                    'https://paper-api.alpaca.markets',
-                    api_version='v2'
+                st.session_state.api = tradeapi.REST(
+                    api_key, 
+                    api_secret, 
+                    'https://paper-api.alpaca.markets'
                 )
-                st.sidebar.success("API Connected!")
+                st.success("API connection established!")
             except Exception as e:
-                st.sidebar.error(f"API Connection Error: {e}")
+                st.error(f"API initialization failed: {str(e)}")
     
     # Trading Parameters
     st.sidebar.subheader("Trading Parameters")
     
+    # Asset selection
     symbol = st.sidebar.selectbox(
         "Trading Pair",
-        ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+        ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT"]
     )
     
     timeframe = st.sidebar.selectbox(
-        "Timeframe",
-        ["1Min", "5Min", "15Min", "1Hour"]
-    )
-    
-    lookback_days = st.sidebar.slider(
-        "Training Data (days)",
-        min_value=7,
-        max_value=90,
-        value=30
+        "Trading Timeframe",
+        ["1MIN", "5MIN", "15MIN", "1HOUR", "1DAY"]
     )
     
     # Risk Management Parameters
-    st.sidebar.subheader("Risk Management")
-    
     risk_per_trade = st.sidebar.slider(
-        "Risk per Trade (%)",
+        "Risk per Trade (%)", 
         min_value=0.1,
-        max_value=2.0,
+        max_value=5.0,
         value=1.0,
         step=0.1
     )
     
     stop_loss_pct = st.sidebar.slider(
-        "Stop Loss (%)",
+        "Stop Loss (%)", 
         min_value=0.5,
-        max_value=5.0,
+        max_value=10.0,
         value=2.0,
-        step=0.1
+        step=0.5
     )
     
     take_profit_pct = st.sidebar.slider(
-        "Take Profit (%)",
+        "Take Profit (%)", 
         min_value=1.0,
-        max_value=10.0,
+        max_value=20.0,
         value=4.0,
-        step=0.1
+        step=0.5
     )
     
-    confidence_threshold = st.sidebar.slider(
-        "Minimum Confidence Threshold",
-        min_value=0.5,
-        max_value=0.95,
-        value=0.6
-    )
+    # Technical Indicator Parameters
+    st.sidebar.subheader("Technical Indicators")
+    sma_short = st.sidebar.slider("Short SMA Period", 5, 50, 20)
+    sma_long = st.sidebar.slider("Long SMA Period", 20, 200, 50)
+    rsi_period = st.sidebar.slider("RSI Period", 7, 21, 14)
     
-    # Main area tabs
-    tab1, tab2 = st.tabs(["Model Training", "Live Trading"])
+    # Model Parameters
+    st.sidebar.subheader("Model Parameters")
+    lookback_days = st.sidebar.slider("Historical Data (days)", 30, 365, 180)
+    n_estimators = st.sidebar.slider("Number of Trees", 50, 300, 100)
+    min_samples_split = st.sidebar.slider("Min Samples Split", 2, 100, 50)
     
-    with tab1:
+    # Main area
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
         st.subheader("Model Training and Backtesting")
         
-if st.button("Train Model"):
-    if st.session_state.bot.api is None:
-        st.error("Please configure API credentials first")
-    else:
-        try:
-            with st.spinner("Fetching historical data..."):
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=lookback_days)
-                
-                # Convert symbol format
-                alpaca_symbol = symbol.replace("/", "")
-                
-                df = st.session_state.bot.fetch_historical_data(
-                    alpaca_symbol,
-                    timeframe,
-                    start_date,
-                    end_date
-                )
-                
-                if df.empty:
-                    st.error("No data received from API")
-                    return
-                
-                st.info(f"Fetched {len(df)} bars of historical data")
-                
-                # Continue with feature creation and model training
-                with st.spinner("Creating features..."):
-                    features = st.session_state.bot.create_features(df)
-                
-                with st.spinner("Training model..."):
-                    metrics, features_df, target = st.session_state.bot.train_model(
-                        df, features
-                    )
-                
-                if df.empty:
-                    st.error("No data received from API")
-                    return
-                
-                st.info(f"Fetched {len(df)} bars of historical data")
-                
-                # Continue with feature creation and model training
-                with st.spinner("Creating features..."):
-                    features = st.session_state.bot.create_features(df)
-                
-                with st.spinner("Training model..."):
-                    metrics, features_df, target = st.session_state.bot.train_model(
-                        df, features
-                    )
-                
-                
-                
-                if df.empty:
-                    st.error("No data received from API")
-                    return
-                
-                st.info(f"Fetched {len(df)} bars of historical data")
-                
-                # Continue with feature creation and model training
-                with st.spinner("Creating features..."):
-                    features = st.session_state.bot.create_features(df)
-                
-                with st.spinner("Training model..."):
-                    metrics, features_df, target = st.session_state.bot.train_model(
-                        df, features
-                    )
+        if st.button("Train Model"):
+            if st.session_state.api is None:
+                st.error("Please enter valid API credentials first")
+            else:
+                try:
+                    # Prepare parameters
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=lookback_days)
                     
-                    with st.spinner("Creating features..."):
-                        features = st.session_state.bot.create_features(df)
+                    model_params = {
+                        'n_estimators': n_estimators,
+                        'min_samples_split': min_samples_split,
+                        'random_state': 42
+                    }
                     
-                    with st.spinner("Training model..."):
-                        metrics, features_df, target = st.session_state.bot.train_model(
-                            df, features
+                    feature_params = {
+                        'sma_short': sma_short,
+                        'sma_long': sma_long,
+                        'rsi_period': rsi_period
+                    }
+                    
+                    with st.spinner('Training model...'):
+                        model, backtest_results, feature_columns, performance = train_model(
+                            st.session_state.api,
+                            symbol,
+                            timeframe,
+                            start_date.strftime('%Y-%m-%d'),
+                            end_date.strftime('%Y-%m-%d'),
+                            model_params,
+                            feature_params
                         )
-                    
-                    with st.spinner("Calculating performance..."):
-                        performance = st.session_state.bot.calculate_performance_metrics(
-                            df,
-                            st.session_state.bot.model.predict(features_df)
-                        )
-                    
-                    # Display metrics
-                    st.subheader("Performance Metrics")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(
-                            "Total Return",
-                            f"{performance['total_return']:.2%}"
-                        )
-                        st.metric(
-                            "Annual Return",
-                            f"{performance['annual_return']:.2%}"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Sharpe Ratio",
-                            f"{performance['sharpe_ratio']:.2f}"
-                        )
-                        st.metric(
-                            "Win Rate",
-                            f"{performance['win_rate']:.2%}"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Max Drawdown",
-                            f"{performance['max_drawdown']:.2%}"
-                        )
-                        st.metric(
-                            "Profit Factor",
-                            f"{performance['profit_factor']:.2f}"
-                        )
-                    
-                    # Model metrics
-                    st.subheader("Model Metrics")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(
-                            "Model Accuracy",
-                            f"{metrics['accuracy']:.2%}"
-                        )
-                    with col2:
-                        st.metric(
-                            "CV Score",
-                            f"{metrics['cv_mean']:.2%} ± {metrics['cv_std']:.2%}"
-                        )
-                    
-                    # Plot results
-                    fig_returns, fig_importance, fig_drawdown = \
-                        st.session_state.bot.plot_results(df, metrics)
-                    
-                    st.plotly_chart(fig_returns, use_container_width=True)
-                    st.plotly_chart(fig_drawdown, use_container_width=True)
-                    st.plotly_chart(fig_importance, use_container_width=True)
-                    
+                        
+                        if model is not None:
+                            st.session_state.model = model
+                            st.session_state.feature_columns = feature_columns
+                            
+                            # Display backtest results
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=backtest_results.index,
+                                y=(1 + backtest_results['returns']).cumprod(),
+                                name='Strategy Returns'
+                            ))
+                            fig.update_layout(
+                                title='Backtest Results',
+                                xaxis_title='Date',
+                                yaxis_title='Cumulative Returns'
+                            )
+                            st.plotly_chart(fig)
+                            
+                            # Display performance metrics
+                            metrics_cols = st.columns(3)
+                            with metrics_cols[0]:
+                                st.metric(
+                                    "Total Return",
+                                    f"{performance['total_return']:.2%}"
+                                )
+                            with metrics_cols[1]:
+                                st.metric(
+                                    "Sharpe Ratio",
+                                    f"{performance['daily_sharpe']:.2f}"
+                                )
+                            with metrics_cols[2]:
+                                st.metric(
+                                    "Max Drawdown",
+                                    f"{performance['max_drawdown']:.2%}"
+                                )
+                            
+                            # Additional metrics
+                            st.write("Detailed Performance Metrics:")
+                            metrics_df = pd.DataFrame({
+                                'Metric': [
+                                    'Win Rate',
+                                    'Profit Factor',
+                                    'Average Win',
+                                    'Average Loss',
+                                    'Annual Return'
+                                ],
+                                'Value': [
+                                    f"{performance['win_rate']:.2%}",
+                                    f"{performance['profit_factor']:.2f}",
+                                    f"{performance['avg_win']:.2%}",
+                                    f"{performance['avg_loss']:.2%}",
+                                    f"{performance['annual_return']:.2%}"
+                                ]
+                            })
+                            st.dataframe(metrics_df)
+                            
                 except Exception as e:
-                    st.error(f"Error during training: {e}")
-                    logger.error(f"Training error: {e}")
+                    st.error(f"Error: {str(e)}")
     
-    with tab2:
+    with col2:
         st.subheader("Live Trading")
-        
-        if st.session_state.bot.model is None:
+        if st.session_state.model is None:
             st.warning("Please train the model first")
-        elif st.session_state.bot.api is None:
-            st.warning("Please configure API credentials")
+        elif st.session_state.api is None:
+            st.warning("Please enter valid API credentials")
         else:
+            trading_params = {
+                'risk_per_trade': risk_per_trade,
+                'stop_loss_pct': stop_loss_pct,
+                'take_profit_pct': take_profit_pct,
+                'sma_short': sma_short,
+                'sma_long': sma_long,
+                'rsi_period': rsi_period
+            }
+            
             if st.button("Start Trading" if not st.session_state.running else "Stop Trading"):
                 st.session_state.running = not st.session_state.running
             
             if st.session_state.running:
                 placeholder = st.empty()
-                
-                while st.session_state.running:
-                    try:
-                        # Get current market data
-                        current_data = st.session_state.bot.fetch_historical_data(
+                try:
+                    while st.session_state.running:
+                        trading_data = run_trading_loop(
+                            placeholder,
+                            st.session_state.model,
+                            st.session_state.feature_columns,
+                            st.session_state.api,
                             symbol,
                             timeframe,
-                            datetime.now() - timedelta(hours=2),
-                            datetime.now()
+                            trading_params
                         )
                         
-                        # Create features
-                        current_features = st.session_state.bot.create_features(current_data)
+                        if trading_data is None:
+                            st.session_state.running = False
+                            break
                         
-                        # Get prediction and probability
-                        prediction = st.session_state.bot.model.predict(
-                            current_features.iloc[-1:])
-                        probability = st.session_state.bot.model.predict_proba(
-                            current_features.iloc[-1:])[0]
-                        confidence = max(probability)
+                        # Execute trades based on signals and position
+                        current_position = trading_data['current_position']
+                        prediction = trading_data['prediction']
                         
-                        # Get account information
-                        account = st.session_state.bot.api.get_account()
-                        buying_power = float(account.buying_power)
+                        if current_position is None and prediction == 1:
+                            # Enter long position
+                            trade_result = execute_trade(
+                                st.session_state.api,
+                                symbol,
+                                'buy',
+                                trading_data['position_size'],
+                                trading_data['stop_loss_price'],
+                                trading_data['current_price'] * (1 + take_profit_pct/100)
+                            )
+                            if trade_result:
+                                st.success(f"Entered long position at {trade_result['fill_price']}")
                         
-                        # Get current position
-                        try:
-                            position = st.session_state.bot.api.get_position(
-                                symbol)
-                            has_position = True
-                        except:
-                            has_position = False
-                        
-                        # Update display
-                        with placeholder.container():
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.metric(
-                                    "Current Price",
-                                    f"${current_data['close'].iloc[-1]:.2f}"
-                                )
-                                st.metric(
-                                    "Signal",
-                                    "BUY" if prediction[0] == 1 else "SELL",
-                                    delta="↑" if prediction[0] == 1 else "↓"
-                                )
-                            
-                            with col2:
-                                st.metric(
-                                    "Confidence",
-                                    f"{confidence:.2%}"
-                                )
-                                st.metric(
-                                    "Buying Power",
-                                    f"${buying_power:.2f}"
-                                )
-                            
-                            with col3:
-                                st.metric(
-                                    "Position",
-                                    "Yes" if has_position else "No"
-                                )
-                                st.metric(
-                                    "Last Update",
-                                    datetime.now().strftime("%H:%M:%S")
-                                )
-                            
-                            # Execute trades
-                            if confidence >= confidence_threshold:
-                                current_price = current_data['close'].iloc[-1]
-                                
-                                if prediction[0] == 1 and not has_position:
-                                    # Calculate position size
-                                    position_size = st.session_state.bot.calculate_position_size(
-                                        buying_power,
-                                        confidence,
-                                        current_price
-                                    )
-                                    
-                                    # Execute buy order
-                                    trade_result = st.session_state.bot.execute_trade(
-                                        symbol,
-                                        'buy',
-                                        position_size,
-                                        stop_loss_pct,
-                                        take_profit_pct
-                                    )
-                                    
-                                    if trade_result:
-                                        st.success(
-                                            f"Bought {position_size:.6f} {symbol} " \
-                                            f"at ${trade_result['fill_price']:.2f}"
-                                        )
-                                
-                                elif prediction[0] == 0 and has_position:
-                                    # Execute sell order
-                                    trade_result = st.session_state.bot.execute_trade(
-                                        symbol,
-                                        'sell',
-                                        float(position.qty),
-                                        stop_loss_pct,
-                                        take_profit_pct
-                                    )
-                                    
-                                    if trade_result:
-                                        st.success(
-                                            f"Sold {position.qty} {symbol} " \
-                                            f"at ${trade_result['fill_price']:.2f}"
-                                        )
+                        elif current_position and prediction == 0:
+                            # Exit position
+                            trade_result = execute_trade(
+                                st.session_state.api,
+                                symbol,
+                                'sell',
+                                current_position['quantity'],
+                                None
+                            )
+                            if trade_result:
+                                st.success(f"Exited position at {trade_result['fill_price']}")
                         
                         time.sleep(60)  # Update every minute
                         
-                    except Exception as e:
-                        logger.error(f"Error in trading loop: {e}")
-                        st.error(f"Trading error: {e}")
-                        st.session_state.running = False
-                        break
+                except Exception as e:
+                    st.error(f"Trading Error: {str(e)}")
+                    st.session_state.running = False
 
 if __name__ == "__main__":
     main()

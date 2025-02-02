@@ -271,10 +271,10 @@ def main():
 
                         if prediction == 1:  # Predicted price increase
                             try:
-                                position = api.get_position(symbol)
+                                position = current_data.iloc[-1]
 
                             except:
-                                api.submit_order(
+                                session_state.api.submit_order(
                                     symbol,
                                     qty=1,
                                     side='buy',
@@ -283,8 +283,8 @@ def main():
                                 )
                         else:  # Predicted price decrease
                             try:
-                                position = api.get_position(symbol)
-                                api.submit_order(
+                                position = current_data.iloc[-1]
+                                session_state.api.submit_order(
                                     symbol,
                                     qty=1,
                                     side='sell',

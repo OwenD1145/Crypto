@@ -18,6 +18,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize session state for API
+if 'api' not in st.session_state:
+    st.session_state.api = None
+
 # Helper functions
 def calculate_rsi(prices, periods=14):
     """Calculate Relative Strength Index"""
@@ -46,6 +50,17 @@ def create_features(df, sma_short, sma_long, rsi_period):
     df['volume_ma'] = df['volume'].rolling(window=20).mean()
     df['volume_ratio'] = df['volume'] / df['volume_ma']
     return df
+
+def initialize_api(api_key, api_secret):
+    """Initialize Alpaca API"""
+    try:
+        api = tradeapi.REST(api_key, api_secret, 'https://paper-api.alpaca.markets')
+        # Test API connection
+        api.get_account()
+        return api
+    except Exception as e:
+        st.error(f"API initialization failed: {str(e)}")
+        return None
 
 def train_model(api, symbol, timeframe, start_date, end_date, model_params, feature_params):
     """Train the trading model with specified parameters"""
@@ -107,6 +122,11 @@ def main():
     api_key = st.sidebar.text_input("Alpaca API Key", type="password")
     api_secret = st.sidebar.text_input("Alpaca API Secret", type="password")
     
+    # Initialize API if credentials are provided
+    if api_key and api_secret:
+        if st.session_state.api is None:
+            st.session_state.api = initialize_api(api_key, api_secret)
+    
     # Training Parameters
     st.sidebar.subheader("Training Parameters")
     lookback_days = st.sidebar.slider("Historical Data (days)", 30, 365, 180)
@@ -142,74 +162,76 @@ def main():
         st.subheader("Model Training and Backtesting")
         
         if st.button("Train Model"):
-            try:
-                # Initialize API
-                api = tradeapi.REST(api_key, api_secret, 'https://paper-api.alpaca.markets')
-                
-                # Prepare parameters
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=lookback_days)
-                
-                model_params = {
-                    'n_estimators': n_estimators,
-                    'min_samples_split': min_samples_split,
-                    'min_samples_leaf': min_samples_leaf,
-                    'random_state': 42
-                }
-                
-                feature_params = {
-                    'sma_short': sma_short,
-                    'sma_long': sma_long,
-                    'rsi_period': rsi_period
-                }
-                
-                with st.spinner('Training model...'):
-                    model, backtest_results, feature_columns, accuracy = train_model(
-                        api, 'SOL/USDT', timeframe, 
-                        start_date.strftime('%Y-%m-%d'),
-                        end_date.strftime('%Y-%m-%d'),
-                        model_params, feature_params
-                    )
+            if st.session_state.api is None:
+                st.error("Please enter valid API credentials first")
+            else:
+                try:
+                    # Prepare parameters
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=lookback_days)
                     
-                    st.session_state.model = model
-                    st.session_state.feature_columns = feature_columns
+                    model_params = {
+                        'n_estimators': n_estimators,
+                        'min_samples_split': min_samples_split,
+                        'min_samples_leaf': min_samples_leaf,
+                        'random_state': 42
+                    }
                     
-                    # Display backtest results
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=backtest_results.index,
-                        y=backtest_results['cumulative_returns'],
-                        name='Strategy Returns'
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=backtest_results.index,
-                        y=backtest_results['buy_hold_returns'],
-                        name='Buy & Hold Returns'
-                    ))
-                    fig.update_layout(title='Backtest Results',
-                                    xaxis_title='Date',
-                                    yaxis_title='Cumulative Returns')
-                    st.plotly_chart(fig)
+                    feature_params = {
+                        'sma_short': sma_short,
+                        'sma_long': sma_long,
+                        'rsi_period': rsi_period
+                    }
                     
-                    # Display metrics
-                    metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                    with metrics_col1:
-                        st.metric("Model Accuracy", f"{accuracy:.2%}")
-                    with metrics_col2:
-                        total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
-                        st.metric("Total Returns", f"{total_returns:.2%}")
-                    with metrics_col3:
-                        sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
-                                               / backtest_results['strategy_returns'].std())
-                        st.metric("Sharpe Ratio", f"{sharpe:.2f}")
-                    
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+                    with st.spinner('Training model...'):
+                        model, backtest_results, feature_columns, accuracy = train_model(
+                            st.session_state.api, 'SOL/USDT', timeframe, 
+                            start_date.strftime('%Y-%m-%d'),
+                            end_date.strftime('%Y-%m-%d'),
+                            model_params, feature_params
+                        )
+                        
+                        st.session_state.model = model
+                        st.session_state.feature_columns = feature_columns
+                        
+                        # Display backtest results
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=backtest_results.index,
+                            y=backtest_results['cumulative_returns'],
+                            name='Strategy Returns'
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=backtest_results.index,
+                            y=backtest_results['buy_hold_returns'],
+                            name='Buy & Hold Returns'
+                        ))
+                        fig.update_layout(title='Backtest Results',
+                                        xaxis_title='Date',
+                                        yaxis_title='Cumulative Returns')
+                        st.plotly_chart(fig)
+                        
+                        # Display metrics
+                        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                        with metrics_col1:
+                            st.metric("Model Accuracy", f"{accuracy:.2%}")
+                        with metrics_col2:
+                            total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
+                            st.metric("Total Returns", f"{total_returns:.2%}")
+                        with metrics_col3:
+                            sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
+                                                   / backtest_results['strategy_returns'].std())
+                            st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                        
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
     
     with col2:
         st.subheader("Live Trading")
         if st.session_state.model is None:
             st.warning("Please train the model first")
+        elif st.session_state.api is None:
+            st.warning("Please enter valid API credentials")
         else:
             if st.button("Start Trading" if not st.session_state.running else "Stop Trading"):
                 st.session_state.running = not st.session_state.running
@@ -219,7 +241,7 @@ def main():
                 try:
                     while st.session_state.running:
                         # Get current data
-                        current_data = api.get_crypto_bars('SOL/USDT', timeframe).df
+                        current_data = st.session_state.api.get_crypto_bars('SOL/USDT', timeframe).df
                         current_data = create_features(
                             current_data, sma_short, sma_long, rsi_period
                         )

@@ -331,12 +331,11 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
                     timeframe: str, params: Dict):
     """Main trading loop with risk management"""
     try:
-        # Convert symbol format for Alpaca
-        alpaca_symbol = symbol.replace('/', '')
+  
         
         # Get current market data - Modified to handle data correctly
         current_data = api.get_crypto_bars(
-            [alpaca_symbol],  # Alpaca expects a list of symbols
+            [symbol],  # Alpaca expects a list of symbols
             timeframe
         ).df
         

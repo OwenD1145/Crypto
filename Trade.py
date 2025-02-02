@@ -264,8 +264,8 @@ def main():
                             
         
                         # Make prediction current_features
-                        X = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
-                        prediction = st.session_state.model.predict(X)[0]
+                        current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
+                        prediction = st.session_state.model.predict(current_features)[0]
 
                         if prediction == 1:  # Predicted price increase
                             try:

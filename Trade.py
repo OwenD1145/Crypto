@@ -461,10 +461,10 @@ def main():
     st.sidebar.subheader("Trading Parameters")
     
     # Asset selection
-    symbol = st.sidebar.selectbox(
+    symbol = str(st.sidebar.selectbox(
         "Trading Pair",
         ['BTC/USDT', "ETH/USDT", 'SOL/USDT', "AVAX/USDT", "MATIC/USDT"]
-    )
+    ))
     
     timeframe = st.sidebar.selectbox(
         "Trading Timeframe",

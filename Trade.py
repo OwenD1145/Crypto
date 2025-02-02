@@ -216,21 +216,27 @@ def main():
                                         xaxis_title='Date',
                                         yaxis_title='Cumulative Returns')
                         st.plotly_chart(fig)
-                        
+
+                        # Feature importance
+                        feature_importance = pd.DataFrame({
+                            'feature': feature_columns,
+                            'importance': model.feature_importances_
+                        }).sort_values('importance', ascending=False)
+
                         # Display metrics
                         metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                        
                         with metrics_col1:
-                            st.metric(f"Model Accuracy,  {accuracy:.2%}")
+                            st.metric("Model Accuracy", f"{accuracy:.2%}")
                         with metrics_col2:
                             total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
-                            st.metric(f"Total Returns: {total_returns:.2%}")
+                            st.metric("Total Returns", f"{total_returns:.2%}")
                         with metrics_col3:
                             sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
                                                    / backtest_results['strategy_returns'].std())
-                            st.metric("Sharpe Ratio", f"{sharpe:.2%}")
-                            
-            
+                            st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+
+                        st,metric(f"{ffeature_importance:.2%}")
+                        
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
     

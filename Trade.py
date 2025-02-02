@@ -424,6 +424,7 @@ def main():
                     model_params = {
                         'n_estimators': n_estimators,
                         'min_samples_split': min_samples_split,
+                        'min_samples_leaf': min_samples_leaf,
                         'random_state': 42
                     }
                     
@@ -434,72 +435,45 @@ def main():
                     }
                     
                     with st.spinner('Training model...'):
-                        model, backtest_results, feature_columns, performance = train_model(
-                            st.session_state.api,
-                            symbol,
-                            timeframe,
+                        model, backtest_results, feature_columns, accuracy = train_model(
+                            st.session_state.api, 'SOL/USDT', timeframe, 
                             start_date.strftime('%Y-%m-%d'),
                             end_date.strftime('%Y-%m-%d'),
-                            model_params,
-                            feature_params
+                            model_params, feature_params
                         )
                         
-                        if model is not None:
-                            st.session_state.model = model
-                            st.session_state.feature_columns = feature_columns
-                            
-                            # Display backtest results
-                            fig = go.Figure()
-                            fig.add_trace(go.Scatter(
-                                x=backtest_results.index,
-                                y=(1 + backtest_results['returns']).cumprod(),
-                                name='Strategy Returns'
-                            ))
-                            fig.update_layout(
-                                title='Backtest Results',
-                                xaxis_title='Date',
-                                yaxis_title='Cumulative Returns'
-                            )
-                            st.plotly_chart(fig)
-                            
-                            # Display performance metrics
-                            metrics_cols = st.columns(3)
-                            with metrics_cols[0]:
-                                st.metric(
-                                    "Total Return",
-                                    f"{performance['total_return']:.2%}"
-                                )
-                            with metrics_cols[1]:
-                                st.metric(
-                                    "Sharpe Ratio",
-                                    f"{performance['daily_sharpe']:.2f}"
-                                )
-                            with metrics_cols[2]:
-                                st.metric(
-                                    "Max Drawdown",
-                                    f"{performance['max_drawdown']:.2%}"
-                                )
-                            
-                            # Additional metrics
-                            st.write("Detailed Performance Metrics:")
-                            metrics_df = pd.DataFrame({
-                                'Metric': [
-                                    'Win Rate',
-                                    'Profit Factor',
-                                    'Average Win',
-                                    'Average Loss',
-                                    'Annual Return'
-                                ],
-                                'Value': [
-                                    f"{performance['win_rate']:.2%}",
-                                    f"{performance['profit_factor']:.2f}",
-                                    f"{performance['avg_win']:.2%}",
-                                    f"{performance['avg_loss']:.2%}",
-                                    f"{performance['annual_return']:.2%}"
-                                ]
-                            })
-                            st.dataframe(metrics_df)
-                            
+                        st.session_state.model = model
+                        st.session_state.feature_columns = feature_columns
+                        
+                        # Display backtest results
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=backtest_results.index,
+                            y=backtest_results['cumulative_returns'],
+                            name='Strategy Returns'
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=backtest_results.index,
+                            y=backtest_results['buy_hold_returns'],
+                            name='Buy & Hold Returns'
+                        ))
+                        fig.update_layout(title='Backtest Results',
+                                        xaxis_title='Date',
+                                        yaxis_title='Cumulative Returns')
+                        st.plotly_chart(fig)
+                        
+                        # Display metrics
+                        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+                        with metrics_col1:
+                            st.metric("Model Accuracy", f"{accuracy:.2%}")
+                        with metrics_col2:
+                            total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
+                            st.metric("Total Returns", f"{total_returns:.2%}")
+                        with metrics_col3:
+                            sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
+                                                   / backtest_results['strategy_returns'].std())
+                            st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+                        
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
     

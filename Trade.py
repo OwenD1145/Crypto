@@ -221,21 +221,16 @@ def main():
                         metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
                         
                         with metrics_col1:
-                            st.metric("Model Accuracy", f"{accuracy:.2%}")
+                            st.metric("Model Accuracy", f"{model.score(X_test, y_test):.2%}")
                         with metrics_col2:
                             total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
-                            st.metric("Total Returns", f"{total_returns:.2%}")
+                            st.metric(f"Total Returns: {total_returns:.2%}")
                         with metrics_col3:
                             sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
                                                    / backtest_results['strategy_returns'].std())
                             st.metric("Sharpe Ratio", f"{sharpe:.2%}")
                             
-                        st.metric(("\nPerformance Metrics:"),
-                                    (f"Total Returns: {total_returns:.2%}"),
-                                 
-                                    (f"Maximum Drawdown: {max_drawdown:.2%}"),
-                                   (f"Model Accuracy: {model.score(X_test, y_test):.2%}"),
-                                 )
+            
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
     

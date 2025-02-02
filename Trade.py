@@ -176,21 +176,25 @@ def train_model(api, symbol: str, timeframe: str, start_date: str, end_date: str
                 model_params: Dict, feature_params: Dict) -> Tuple:
     """Train and backtest the trading model"""
     try:
-        # Convert symbol format for Alpaca (remove '/')
+        # Convert symbol format for Alpaca
         alpaca_symbol = symbol.replace('/', '')
         
         st.info(f"Fetching data for {alpaca_symbol}...")
         
-        # Fetch historical data
+        # Fetch historical data - Modified to handle data correctly
         historical_bars = api.get_crypto_bars(
-            alpaca_symbol,
+            [alpaca_symbol],  # Alpaca expects a list of symbols
             timeframe,
             start=start_date,
             end=end_date
         ).df
         
-        # Reset index to make timestamp a column
-        historical_data = historical_bars.reset_index()
+        # Handle multi-level index from Alpaca API
+        if isinstance(historical_bars.index, pd.MultiIndex):
+            # Select data for our symbol and reset index
+            historical_data = historical_bars.loc[alpaca_symbol].reset_index()
+        else:
+            historical_data = historical_bars.reset_index()
         
         if historical_data.empty:
             st.error("No data received from API")
@@ -206,6 +210,9 @@ def train_model(api, symbol: str, timeframe: str, start_date: str, end_date: str
             'SMA_short', 'SMA_long', 'RSI', 'price_change', 'volatility',
             'MACD', 'MACD_signal', 'volume_ratio', 'BB_width', 'MFI', 'ADX', 'ATR_ratio'
         ]
+        
+        # Rest of the function remains the same...
+
         
         # Ensure all feature columns exist
         missing_columns = [col for col in feature_columns if col not in features.columns]
@@ -319,6 +326,7 @@ def execute_trade(api, symbol: str, side: str, quantity: float,
         logger.error(f"Error executing trade: {str(e)}")
         st.error(f"Trade execution failed: {str(e)}")
         return None
+      
 def run_trading_loop(placeholder, model, feature_columns, api, symbol: str, 
                     timeframe: str, params: Dict):
     """Main trading loop with risk management"""
@@ -326,12 +334,22 @@ def run_trading_loop(placeholder, model, feature_columns, api, symbol: str,
         # Convert symbol format for Alpaca
         alpaca_symbol = symbol.replace('/', '')
         
-        # Get current market data
-        current_data = api.get_crypto_bars(alpaca_symbol, timeframe).df
+        # Get current market data - Modified to handle data correctly
+        current_data = api.get_crypto_bars(
+            [alpaca_symbol],  # Alpaca expects a list of symbols
+            timeframe
+        ).df
+        
+        # Handle multi-level index
+        if isinstance(current_data.index, pd.MultiIndex):
+            current_data = current_data.loc[alpaca_symbol]
         
         if current_data.empty:
             st.error("Unable to fetch current market data")
             return None
+            
+        # Rest of the function remains the same...
+
             
         # Create features
         features = create_features(current_data, params)

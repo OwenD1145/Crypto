@@ -228,7 +228,7 @@ def main():
     # Trading parameters
     symbol = st.sidebar.selectbox(
         "Trading Pair",
-        ["BTC/USD", "ETH/USD", "SOL/USD"]
+        ["BTC/USD", "ETH/USD", "SOL/USDT"]
     )
     
     lookback_days = st.sidebar.slider(

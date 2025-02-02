@@ -259,13 +259,37 @@ def main():
                         # Make prediction
                         current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
                         prediction = st.session_state.model.predict(current_features)[0]
-                        
+
+                        if prediction == 1:  # Predicted price increase
+                            try:
+                                position = api.get_position(symbol)
+
+                            except:
+                                api.submit_order(
+                                    symbol,
+                                    qty=1,
+                                    side='buy',
+                                    type='market',
+                                    time_in_force='gtc'
+                                )
+                        else:  # Predicted price decrease
+                            try:
+                                position = api.get_position(symbol)
+                                api.submit_order(
+                                    symbol,
+                                    qty=1,
+                                    side='sell',
+                                    type='market',
+                                    time_in_force='gtc'
+                                )
+                            except:
+                                print("No position to sell...")
                         # Update display
                         with placeholder.container():
-                            st.metric("Current SOL Price", 
+                            st.metric("Current Price", 
                                     f"${current_data['close'].iloc[-1]:.2f}")
                             st.metric("Trading Signal",
-                                    "BUY" if prediction == 1 else "SELL")
+                                    (f"Executing buy order at {datetime.now()}") if prediction == 1 else (f"Executing sell order at {datetime.now()}"))
                             st.metric("Last Updated",
                                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                         

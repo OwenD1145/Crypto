@@ -259,16 +259,7 @@ def main():
                      
                         current_data = current_data.dropna()
                     
-                        # Create target variable
-                        current_data['target'] = (current_data['close'].shift(-1) > current_data['close']).astype(int)
-                    
-                        # Prepare features for training
-                        feature_columns = [
-                            'SMA_short', 'SMA_long', 'RSI', 'price_change', 'volatility',
-                            'MACD', 'MACD_signal', 'volume_ratio'
-                        ]
-                        
-                        
+                                  
                         
                             
                            

@@ -366,7 +366,7 @@ def main():
     
     timeframe = st.sidebar.selectbox(
         "Trading Timeframe",
-        ["1Min", "5Min", "15Min", "1Hour", "1Day"]
+        ["1MIN", "5MIN", "15MIN", "1HOUR", "1DAY"]
     )
     
     # Risk Management Parameters

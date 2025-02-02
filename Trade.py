@@ -231,7 +231,7 @@ def main():
                                                    / backtest_results['strategy_returns'].std())
                             st.metric("Sharpe Ratio", f"{sharpe:.2f}")
 
-                        backtesting_results[:]
+                        backtest_results[:]
                         
                 except Exception as e:
                     st.error(f"Error: {str(e)}")

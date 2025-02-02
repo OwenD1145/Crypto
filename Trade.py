@@ -289,7 +289,7 @@ def main():
                                 )
                             except:
                                 print("No position to sell...")
-                        Update display
+                        # Update display
                         with placeholder.container():
                             st.metric("Current Price", 
                                     f"${current_data['close'].iloc[-1]:.2f}")

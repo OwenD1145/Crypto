@@ -253,7 +253,7 @@ def main():
                         # Get current data
                         current_data = st.session_state.api.get_crypto_bars(symbol, timeframe).df
                         current_data = create_features(                 
-                            current_data, st.session_state.sma_short, st.session_state.sma_long, st.session_state.rsi_period
+                            current_data, sma_short, sma_long, rsi_period
                         )
                             
                      

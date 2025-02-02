@@ -121,7 +121,7 @@ def execute_trade(api, symbol, side, quantity):
         return None
 
 def main():
-    st.title("🌊 Solana Trading Bot")
+    st.title(" Solana Trading Bot")
     
     # Sidebar for configuration
     st.sidebar.header("Configuration")
@@ -131,10 +131,10 @@ def main():
     api_secret = st.sidebar.text_input("Alpaca API Secret", type="password")
     
     # Trading Parameters
-    position_size = st.sidebar.number_input("Position Size (USD)", 
-                                          min_value=10, 
-                                          max_value=1000, 
-                                          value=100)
+    position_size = st.sidebar.number_input("Position Size (USDT)", 
+                                          min_value=.01, 
+                                          max_value=10, 
+                                          value=1)
     
     min_confidence = st.sidebar.slider("Minimum Confidence", 
                                      min_value=0.5, 
@@ -191,7 +191,7 @@ def main():
                     try:
                         # Get current market data
                         current_data = st.session_state.api.get_crypto_bars(
-                            ['SOLUSD'],
+                            ['SOL/USDT'],
                             '1Min'
                         ).df
                         

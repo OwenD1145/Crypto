@@ -464,7 +464,7 @@ def main():
     symbol = str(st.text_input("Enter Trading Pair",
                         "SOL/USDT",
                         key = "placeholder"
-                        ))
+                        
     ))
     
     timeframe = st.sidebar.selectbox(

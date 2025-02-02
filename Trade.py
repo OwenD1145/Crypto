@@ -262,9 +262,6 @@ def main():
                                   
                         
                             
-                           
-                                           
-                       
         
                         # Make prediction current_features
                         X = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
@@ -272,12 +269,12 @@ def main():
 
                         if prediction == 1:  # Predicted price increase
                             try:
-                                position = current_data.iloc[-1]
+                                position = st.session_state.api.get_crypto_bars(symbol,timeframe)
 
                             except:
-                                session_state.api.submit_order(
+                                st.session_state.api.submit_order(
                                     symbol,
-                                    qty=1,
+                                    qty=position_size,
                                     side='buy',
                                     type='market',
                                     time_in_force='gtc'
@@ -285,9 +282,9 @@ def main():
                         else:  # Predicted price decrease
                             try:
                                 position = current_data.iloc[-1]
-                                session_state.api.submit_order(
+                                st.session_state.api.submit_order(
                                     symbol,
-                                    qty=1,
+                                    qty=position_size,
                                     side='sell',
                                     type='market',
                                     time_in_force='gtc'

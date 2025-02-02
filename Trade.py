@@ -255,9 +255,7 @@ def main():
                         current_data = create_features(                 
                             current_data, sma_short, sma_long, rsi_period
                         )
-                            
-                     
-                        current_data = current_data.dropna()
+                        
                     
                                   
                         
@@ -267,31 +265,31 @@ def main():
                         current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
                         prediction = st.session_state.model.predict(current_features)[0]
 
-                        # if prediction == 1:  # Predicted price increase
-                        #     try:
-                        #         position = st.session_state.api.get_position(symbol)
+                        if prediction == 1:  # Predicted price increase
+                            try:
+                                position = st.session_state.api.get_position(symbol)
 
-                        #     except:
-                        #         st.session_state.api.submit_order(
-                        #             symbol,
-                        #             qty=position_size,
-                        #             side='buy',
-                        #             type='market',
-                        #             time_in_force='gtc'
-                        #         )
-                        # else:  # Predicted price decrease
-                        #     try:
-                        #         position = st.session_state.api.get_position(symbol)
-                        #         st.session_state.api.submit_order(
-                        #             symbol,
-                        #             qty=position_size,
-                        #             side='sell',
-                        #             type='market',
-                        #             time_in_force='gtc'
-                        #         )
-                        #     except:
-                        #         print("No position to sell...")
-                        # Update display
+                            except:
+                                st.session_state.api.submit_order(
+                                    symbol,
+                                    qty=position_size,
+                                    side='buy',
+                                    type='market',
+                                    time_in_force='gtc'
+                                )
+                        else:  # Predicted price decrease
+                            try:
+                                position = st.session_state.api.get_position(symbol)
+                                st.session_state.api.submit_order(
+                                    symbol,
+                                    qty=position_size,
+                                    side='sell',
+                                    type='market',
+                                    time_in_force='gtc'
+                                )
+                            except:
+                                print("No position to sell...")
+                        Update display
                         with placeholder.container():
                             st.metric("Current Price", 
                                     f"${current_data['close'].iloc[-1]:.2f}")

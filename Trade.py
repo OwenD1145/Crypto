@@ -269,7 +269,7 @@ def main():
 
                         if prediction == 1:  # Predicted price increase
                             try:
-                                position = st.session_state.api.get_crypto_bars(symbol,timeframe)
+                                position = st.session_state.api.get_position(symbol)
 
                             except:
                                 st.session_state.api.submit_order(

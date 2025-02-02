@@ -217,11 +217,7 @@ def main():
                                         yaxis_title='Cumulative Returns')
                         st.plotly_chart(fig)
 
-                        # Feature importance
-                        feature_importance = pd.DataFrame({
-                            'feature': feature_columns,
-                            'importance': model.feature_importances_
-                        }).sort_values('importance', ascending=False)
+                      
 
                         # Display metrics
                         metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
@@ -235,7 +231,7 @@ def main():
                                                    / backtest_results['strategy_returns'].std())
                             st.metric("Sharpe Ratio", f"{sharpe:.2f}")
 
-                        st.metric(f"{ffeature_importance:.2%}")
+                        backtesting_results[:]
                         
                 except Exception as e:
                     st.error(f"Error: {str(e)}")

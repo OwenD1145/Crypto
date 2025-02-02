@@ -126,9 +126,13 @@ def main():
         "Trading Pair",
         ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT"]
     )
-    
+
+    # Trading Parameters
+    st.sidebar.subheader("Trading Parameters")
+    position_size = st.sidebar.number_input("Position Size (USDT)", .01, 100, 1.0)
+    timeframe = st.sidebar.selectbox("Trading Timeframe", 
+                                   ["1Min", "5Min", "15Min", "1Hour", "1Day"])
   
-    
     # Initialize API if credentials are provided
     if api_key and api_secret:
         if st.session_state.api is None:
@@ -150,11 +154,6 @@ def main():
     min_samples_split = st.sidebar.slider("Min Samples Split", 2, 100, 50)
     min_samples_leaf = st.sidebar.slider("Min Samples Leaf", 1, 100, 20)
     
-    # Trading Parameters
-    st.sidebar.subheader("Trading Parameters")
-    position_size = st.sidebar.number_input("Position Size (USD)", 10.0, 1000.0, 100.0)
-    timeframe = st.sidebar.selectbox("Trading Timeframe", 
-                                   ["1Min", "5Min", "15Min", "1Hour", "1Day"])
     
     # Initialize session state
     if 'model' not in st.session_state:

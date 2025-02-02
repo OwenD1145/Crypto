@@ -76,9 +76,9 @@ def train_model(api, symbol, timeframe, start_date, end_date, model_params, feat
     # Create features
     df = create_features(
         historical_data,
-        feature_params['SMA_short'],
-        feature_params['SMA_long'],
-        feature_params['RSI_period']
+        feature_params['sma_short'],
+        feature_params['sma_long'],
+        feature_params['rsi_period']
     )
     df = df.dropna()
 
@@ -253,9 +253,20 @@ def main():
                         # Get current data
                         current_data = st.session_state.api.get_crypto_bars(symbol, timeframe).df
                         current_data = create_features(
-                            current_data, sma_short, sma_long, rsi_period
-                        )
-                        
+                            current_data, 
+                            sma_short,
+                            sma_long,
+                            rsi_period)
+                            
+                            
+                            #     feature_params['sma_short'],
+                        #     feature_params['sma_long'],
+                        #     feature_params['rsi_period']
+                        # )
+                        # current_data = current_data.dropna()
+                                           
+                       
+        
                         # Make prediction
                         current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
                         prediction = st.session_state.model.predict(current_features)[0]

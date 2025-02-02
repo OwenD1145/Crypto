@@ -76,9 +76,9 @@ def train_model(api, symbol, timeframe, start_date, end_date, model_params, feat
     # Create features
     df = create_features(
         historical_data,
-        feature_params['sma_short'],
-        feature_params['sma_long'],
-        feature_params['rsi_period']
+        feature_params['SMA_short'],
+        feature_params['SMA_long'],
+        feature_params['RSI_period']
     )
     df = df.dropna()
 
@@ -289,7 +289,7 @@ def main():
                             st.metric("Current Price", 
                                     f"${current_data['close'].iloc[-1]:.2f}")
                             st.metric("Trading Signal",
-                                    (f"Executing buy order at {datetime.now()}") if prediction == 1 else (f"Executing sell order at {datetime.now()}"))
+                                    (f"Buy order at {datetime.now()}") if prediction == 1 else (f"Sell order at {datetime.now()}"))
                             st.metric("Last Updated",
                                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                         

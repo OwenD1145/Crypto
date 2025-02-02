@@ -101,7 +101,7 @@ class TradingBot:
             logger.error(f"Error creating features: {e}")
             raise
 
-    def fetch_historical_data(self, symbol: str, timeframe: str, 
+def fetch_historical_data(self, symbol: str, timeframe: str, 
                          start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """Fetch historical data from Alpaca"""
     try:
@@ -127,6 +127,22 @@ class TradingBot:
             start=start_str,
             end=end_str
         ).df
+        
+        # Handle multi-level index if present
+        if isinstance(bars.index, pd.MultiIndex):
+            bars = bars.loc[symbol]
+        
+        # Verify we have data
+        if bars.empty:
+            raise ValueError("No data received from API")
+        
+        logger.info(f"Received {len(bars)} bars of data")
+        return bars
+        
+    except Exception as e:
+        logger.error(f"Error fetching historical data: {e}")
+        raise
+
         
         # Handle multi-level index if present
         if isinstance(bars.index, pd.MultiIndex):

@@ -122,6 +122,12 @@ def main():
     st.sidebar.subheader("API Settings")
     api_key = st.sidebar.text_input("Alpaca API Key", type="password")
     api_secret = st.sidebar.text_input("Alpaca API Secret", type="password")
+    symbol = st.sidebar.selectbox(
+        "Trading Pair",
+        ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT"]
+    )
+    
+  
     
     # Initialize API if credentials are provided
     if api_key and api_secret:
@@ -186,7 +192,7 @@ def main():
                     
                     with st.spinner('Training model...'):
                         model, backtest_results, feature_columns, accuracy = train_model(
-                            st.session_state.api, 'SOL/USDT', timeframe, 
+                            st.session_state.api, symbol, timeframe, 
                             start_date.strftime('%Y-%m-%d'),
                             end_date.strftime('%Y-%m-%d'),
                             model_params, feature_params

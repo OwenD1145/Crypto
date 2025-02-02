@@ -490,7 +490,7 @@ def main():
     with tab1:
         st.subheader("Model Training and Backtesting")
         
-    if st.button("Train Model"):
+if st.button("Train Model"):
     if st.session_state.bot.api is None:
         st.error("Please configure API credentials first")
     else:
@@ -508,6 +508,21 @@ def main():
                     start_date,
                     end_date
                 )
+                
+                if df.empty:
+                    st.error("No data received from API")
+                    return
+                
+                st.info(f"Fetched {len(df)} bars of historical data")
+                
+                # Continue with feature creation and model training
+                with st.spinner("Creating features..."):
+                    features = st.session_state.bot.create_features(df)
+                
+                with st.spinner("Training model..."):
+                    metrics, features_df, target = st.session_state.bot.train_model(
+                        df, features
+                    )
                 
                 if df.empty:
                     st.error("No data received from API")

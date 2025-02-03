@@ -55,7 +55,7 @@ def create_features(df, sma_short, sma_long, rsi_period):
 def initialize_api(api_key, api_secret):
     """Initialize Alpaca API"""
     try:
-        api = tradeapi.REST(api_key, api_secret, 'https://paper-api.alpaca.markets')
+        api = tradeapi.REST(api_key, api_secret, 'https://paper-api.alpaca.markets/v2')
         # Test API connection
         api.get_account()
         return api

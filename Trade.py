@@ -275,7 +275,7 @@ def main():
                                     qty=position_size,
                                     side='buy',
                                     type='market',
-                                    time_in_force='day'
+                                    time_in_force='gtc'
                                 )
                         else:  # Predicted price decrease
                             try:
@@ -285,7 +285,7 @@ def main():
                                     qty=position_size,
                                     side='sell',
                                     type='market',
-                                    time_in_force='day'
+                                    time_in_force='gtc'
                                 )
                             except:
                                 print("No position to sell...")

@@ -5,29 +5,15 @@ diffusers==0.23.1
 transformers==4.34.1
 accelerate==0.24.1
 safetensors==0.4.0
-pillow==10.1.0
+
+# Image processing
+Pillow==10.1.0
 
 # Performance optimizations
 xformers==0.0.22
-triton==2.1.0
 
-# Additional utilities
-numpy>=1.24.3
-scipy>=1.11.3
-tqdm>=4.66.1
-requests>=2.31.0
-packaging>=23.2
-huggingface-hub>=0.19.4
-filelock>=3.13.1
-regex>=2023.10.3
-typing_extensions>=4.8.0
-pyyaml>=6.0.1
-
-# Image processing
-opencv-python-headless>=4.8.1.78
-
-# Memory management
-psutil>=5.9.6
-
-# Environment management
-python-dotenv>=1.0.0
+# Additional dependencies
+numpy==1.26.2
+tqdm==4.66.1
+typing_extensions==4.8.0
+packaging==23.2

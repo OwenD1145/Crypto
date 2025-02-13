@@ -1,19 +1,11 @@
 # Core dependencies
-streamlit==1.28.2
-torch==2.1.0
-diffusers==0.23.1
-transformers==4.34.1
-accelerate==0.24.1
-safetensors==0.4.0
+streamlit>=1.28.2
+torch>=2.1.0
+diffusers>=0.23.1
+transformers>=4.34.1
+accelerate>=0.24.1
+safetensors>=0.4.0
+Pillow>=10.1.0
 
-# Image processing
-Pillow==10.1.0
-
-# Performance optimizations
-xformers==0.0.22
-
-# Additional dependencies
-numpy==1.26.2
-tqdm==4.66.1
-typing_extensions==4.8.0
-packaging==23.2
+# Optional but recommended for better performance
+xformers>=0.0.22

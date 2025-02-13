@@ -1,69 +1,94 @@
 import streamlit as st
 import torch
-from diffusers import StableDiffusionXLPipeline
-from PIL import Image
-import io
+from diffusers import DiffusionPipeline
 import time
+import os
 
-# Page config
+# Configure page
 st.set_page_config(
-    page_title="Pony XL Image Generator",
-    page_icon="🎨",
+    page_title="Pony SDXL Image Generator",
+    page_icon="🐎",
     layout="wide"
 )
 
-# Initialize session state for generated images
-if 'generated_images' not in st.session_state:
-    st.session_state.generated_images = []
+# Initialize session states
+if 'history' not in st.session_state:
+    st.session_state.history = []
 
 @st.cache_resource
-def load_model():
-    """Load the Pony XL model"""
-    model_id = "John6666/real-hybrid-pony-xl-v10-sdxl"
+def load_pipeline():
+    """Load and cache the model pipeline"""
+    model_id = "nousr/pony-sdxl"
     
-    # Check if CUDA is available and set dtype accordingly
     if torch.cuda.is_available():
-        pipeline = StableDiffusionXLPipeline.from_pretrained(
+        pipeline = DiffusionPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.float16,
-            use_safetensors=True,
+            use_safetensors=True
         ).to("cuda")
     else:
-        pipeline = StableDiffusionXLPipeline.from_pretrained(
+        pipeline = DiffusionPipeline.from_pretrained(
             model_id,
-            use_safetensors=True,
+            use_safetensors=True
         ).to("cpu")
     
     return pipeline
 
-def generate_image(prompt, negative_prompt, num_steps, guidance_scale):
-    """Generate image from prompt"""
-    pipeline = load_model()
+def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height):
+    """Generate image using the pipeline"""
+    pipeline = load_pipeline()
     
     with torch.inference_mode():
-        image = pipeline(
+        result = pipeline(
             prompt=prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=num_steps,
+            num_inference_steps=steps,
             guidance_scale=guidance_scale,
-        ).images[0]
-    
-    return image
+            width=width,
+            height=height
+        )
+        
+    return result.images[0]
 
 def main():
-    st.title("🎨 Pony XL Image Generator")
-    st.write("Generate unique images using the real-hybrid-pony-xl-v10-sdxl model")
+    st.title("🐎 Pony SDXL Image Generator")
+    st.markdown("Create beautiful pony-styled images using SDXL")
 
-    # Sidebar controls
+    # Sidebar for settings
     with st.sidebar:
         st.header("Generation Settings")
-        num_steps = st.slider("Number of Steps", 20, 100, 30)
-        guidance_scale = st.slider("Guidance Scale", 1.0, 20.0, 7.5)
+        
+        width = st.select_slider(
+            "Image Width",
+            options=[512, 768, 1024],
+            value=1024
+        )
+        
+        height = st.select_slider(
+            "Image Height",
+            options=[512, 768, 1024],
+            value=1024
+        )
+        
+        steps = st.slider(
+            "Generation Steps",
+            min_value=20,
+            max_value=100,
+            value=30,
+            help="More steps = better quality but slower generation"
+        )
+        
+        guidance_scale = st.slider(
+            "Guidance Scale",
+            min_value=1.0,
+            max_value=20.0,
+            value=7.5,
+            help="How closely to follow the prompt"
+        )
         
         st.header("System Info")
-        device = "GPU 🚀" if torch.cuda.is_available() else "CPU 💻"
-        st.write(f"Using device: {device}")
-        
+        device = "🚀 GPU" if torch.cuda.is_available() else "💻 CPU"
+        st.write(f"Using: {device}")
         if torch.cuda.is_available():
             st.write(f"GPU: {torch.cuda.get_device_name(0)}")
 
@@ -72,77 +97,95 @@ def main():
     
     with col1:
         prompt = st.text_area(
-            "Enter your prompt",
-            height=100,
-            placeholder="Describe the image you want to generate..."
+            "Prompt",
+            placeholder="Describe the image you want to generate...",
+            help="Be specific and detailed in your description"
         )
         
         negative_prompt = st.text_area(
-            "Enter negative prompt (what you don't want in the image)",
-            height=100,
-            placeholder="Elements you want to avoid in the generation...",
-            value="ugly, deformed, noisy, blurry, low quality, distorted"
+            "Negative Prompt",
+            value="ugly, deformed, noisy, blurry, low quality, distorted, bad anatomy",
+            help="Describe what you don't want in the image"
         )
 
     with col2:
         st.info("""
-        💡 **Tips for better results:**
+        **Tips for better results:**
         - Be specific in your descriptions
-        - Include details about style, lighting, and composition
-        - Use the negative prompt to avoid unwanted elements
+        - Include details about style and composition
+        - Mention lighting and atmosphere
+        - Use artistic terms for better results
         """)
 
     # Generate button
-    if st.button("🎨 Generate Image"):
+    if st.button("🎨 Generate Image", type="primary"):
         if not prompt:
             st.warning("Please enter a prompt first!")
             return
-        
+            
         try:
-            with st.spinner("🎨 Generating your image... Please wait..."):
+            with st.spinner("🎨 Creating your masterpiece..."):
                 start_time = time.time()
                 
-                # Generate the image
-                generated_image = generate_image(
-                    prompt,
-                    negative_prompt,
-                    num_steps,
-                    guidance_scale
+                image = generate_image(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    steps=steps,
+                    guidance_scale=guidance_scale,
+                    width=width,
+                    height=height
                 )
                 
-                end_time = time.time()
-                generation_time = end_time - start_time
+                generation_time = time.time() - start_time
                 
-                # Add to session state
-                st.session_state.generated_images.append({
-                    'image': generated_image,
-                    'prompt': prompt,
-                    'time': generation_time
+                # Add to history
+                st.session_state.history.append({
+                    "prompt": prompt,
+                    "image": image,
+                    "time": generation_time,
+                    "settings": {
+                        "steps": steps,
+                        "guidance_scale": guidance_scale,
+                        "size": f"{width}x{height}"
+                    }
                 })
             
             st.success(f"Image generated in {generation_time:.2f} seconds!")
 
         except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+            st.error(f"Generation failed: {str(e)}")
             return
 
-    # Display generated images
-    if st.session_state.generated_images:
+    # Display history
+    if st.session_state.history:
         st.header("Generated Images")
-        for idx, item in enumerate(reversed(st.session_state.generated_images)):
-            with st.expander(f"Image {len(st.session_state.generated_images) - idx}", expanded=(idx == 0)):
-                st.image(item['image'], use_column_width=True)
-                st.write(f"**Prompt:** {item['prompt']}")
-                st.write(f"**Generation Time:** {item['time']:.2f} seconds")
+        
+        for idx, item in enumerate(reversed(st.session_state.history)):
+            with st.expander(
+                f"Image {len(st.session_state.history) - idx}",
+                expanded=(idx == 0)
+            ):
+                st.image(item["image"], use_column_width=True)
                 
-                # Add download button
-                buf = io.BytesIO()
-                item['image'].save(buf, format='PNG')
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Prompt:**", item["prompt"])
+                    st.write("**Generation Time:**", f"{item['time']:.2f}s")
+                
+                with col2:
+                    st.write("**Settings:**")
+                    st.write(f"- Size: {item['settings']['size']}")
+                    st.write(f"- Steps: {item['settings']['steps']}")
+                    st.write(f"- Guidance Scale: {item['settings']['guidance_scale']}")
+                
+                # Save button
+                img_bytes = io.BytesIO()
+                item["image"].save(img_bytes, format="PNG")
                 st.download_button(
-                    label="Download Image",
-                    data=buf.getvalue(),
-                    file_name=f"generated_image_{idx}.png",
-                    mime="image/png"
+                    "💾 Save Image",
+                    img_bytes.getvalue(),
+                    f"pony_generation_{int(time.time())}.png",
+                    "image/png"
                 )
 
 if __name__ == "__main__":

@@ -1,311 +1,151 @@
 import streamlit as st
-import alpaca_trade_api as tradeapi
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-import time
-import plotly.graph_objects as go
-import plotly.express as px
-from PIL import Image
+from diffusers import StableDiffusionXLPipeline
+import torch
+from io import BytesIO
 
-# Page config
-st.set_page_config(
-    page_title="Solana Trading Bot",
-    page_icon="📈",
-    layout="wide"
-)
-
-# Initialize session state for API
-if 'api' not in st.session_state:
-    st.session_state.api = None
-
-# Helper functions
-def calculate_rsi(prices, periods=14):
-    """Calculate Relative Strength Index"""
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_macd(prices, slow=26, fast=12, signal=9):
-    """Calculate MACD and Signal Line"""
-    exp1 = prices.ewm(span=fast, adjust=False).mean()
-    exp2 = prices.ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
-
-def create_features(df, sma_short, sma_long, rsi_period):
-    """Create technical indicators and features"""
-    df['SMA_short'] = df['close'].rolling(window=sma_short).mean()
-    df['SMA_long'] = df['close'].rolling(window=sma_long).mean()
-    df['RSI'] = calculate_rsi(df['close'], periods=rsi_period)
-    df['price_change'] = df['close'].pct_change()
-    df['volatility'] = df['close'].rolling(window=20).std()
-    df['MACD'], df['MACD_signal'] = calculate_macd(df['close'])
-    df['volume_ma'] = df['volume'].rolling(window=20).mean()
-    df['volume_ratio'] = df['volume'] / df['volume_ma']
-    df.to_numpy()
-    return df
-
-def initialize_api(api_key, api_secret):
-    """Initialize Alpaca API"""
-    try:
-        api = tradeapi.REST(api_key, api_secret, 'https://paper-api.alpaca.markets/v2')
-        # Test API connection
-        api.get_account()
-        return api
-    except Exception as e:
-        st.error(f"API initialization failed: {str(e)}")
-        return None
-
-def train_model(api, symbol, timeframe, start_date, end_date, model_params, feature_params):
-    """Train the trading model with specified parameters"""
-    # Fetch historical data
-    historical_data = api.get_crypto_bars(
-        symbol,
-        timeframe,
-        start=start_date,
-        end=end_date
-    ).df
-
-    # Create features
-    df = create_features(
-        historical_data,
-        feature_params['sma_short'],
-        feature_params['sma_long'],
-        feature_params['rsi_period']
-    )
-    df = df.dropna()
-
-    # Create target variable
-    df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
-
-    # Prepare features for training
-    feature_columns = [
-        'SMA_short', 'SMA_long', 'RSI', 'price_change', 'volatility',
-        'MACD', 'MACD_signal', 'volume_ratio'
-    ]
+@st.cache_resource
+def load_model():
+    """Load the Pony XL model"""
+    model_id = "John6666/real-hybrid-pony-xl-v10-sdxl"
     
-    X = df[feature_columns]
-    y = df['target']
+    # Check if CUDA is available and set dtype accordingly
+    if torch.cuda.is_available():
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+            # variant="fp16"
+        ).to("cuda")
+    else:
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            model_id,
+            use_safetensors=True,
+        ).to("cpu")
+    
+    return pipeline
 
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False
-    )
+def create_pony_prompt(base_prompt):
+    """Enhance prompt with pony-specific styling"""
+    style_prompt = ("masterpiece, best quality, highly detailed, "
+                   "beautiful lighting, vibrant colors")
+    return f"{base_prompt}, {style_prompt}"
 
-    # Train model
-    model = RandomForestClassifier(**model_params)
-    model.fit(X_train, y_train)
+def generate_image(pipeline, prompt, negative_prompt="", guidance_scale=7.5, steps=30):
+    """Generate image using the pipeline"""
+    with torch.inference_mode():
+        image = pipeline(
+            prompt=create_pony_prompt(prompt),
+            negative_prompt=negative_prompt,
+            guidance_scale=guidance_scale,
+            num_inference_steps=steps,
+        ).images[0]
+    return image
 
-    # Generate predictions for backtesting
-    df['predicted_signal'] = model.predict(X)
-    df['strategy_returns'] = df['price_change'].shift(-1) * df['predicted_signal']
-    df['cumulative_returns'] = (1 + df['strategy_returns']).cumprod()
-    df['buy_hold_returns'] = (1 + df['price_change']).cumprod()
-
-    return model, df, feature_columns, model.score(X_test, y_test)
-
-# Streamlit UI
 def main():
-    st.title("🤖 Solana Trading Bot Dashboard")
-    
-    # Sidebar configuration
-    st.sidebar.header("Configuration")
-    
-    # API Configuration
-    st.sidebar.subheader("API Settings")
-    api_key = st.sidebar.text_input("Alpaca API Key", type="password")
-    api_secret = st.sidebar.text_input("Alpaca API Secret", type="password")
-    symbol = st.sidebar.selectbox(
-        "Trading Pair",
-        ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT"]
+    st.set_page_config(
+        page_title="Pony XL Image Generator",
+        page_icon="🐎",
+        layout="wide"
     )
-
-    # Trading Parameters
-    st.sidebar.subheader("Trading Parameters")
-    position_size = st.sidebar.number_input("Position Size (USDT)", .01, 10.00, 1.00)
-    timeframe = st.sidebar.selectbox("Trading Timeframe", 
-                                   ["1Min", "5Min", "15Min", "1Hour", "1Day"])
-  
-    # Initialize API if credentials are provided
-    if api_key and api_secret:
-        if st.session_state.api is None:
-            st.session_state.api = initialize_api(api_key, api_secret)
     
-    # Training Parameters
-    st.sidebar.subheader("Training Parameters")
-    lookback_days = st.sidebar.slider("Historical Data (days)", 30, 365, 180)
+    st.title("🐎 Pony XL Image Generator")
+    st.markdown("Create beautiful pony-style images using AI")
     
-    # Feature Parameters
-    st.sidebar.subheader("Technical Indicators")
-    sma_short = st.sidebar.slider("Short SMA Period", 5, 50, 20)
-    sma_long = st.sidebar.slider("Long SMA Period", 20, 200, 50)
-    rsi_period = st.sidebar.slider("RSI Period", 7, 21, 14)
+    # Display device info
+    device_info = "🖥️ Using GPU" if torch.cuda.is_available() else "🖥️ Using CPU (generation will be slower)"
+    st.info(device_info)
     
-    # Model Parameters
-    st.sidebar.subheader("Model Parameters")
-    n_estimators = st.sidebar.slider("Number of Trees", 50, 300, 100)
-    min_samples_split = st.sidebar.slider("Min Samples Split", 2, 100, 50)
-    min_samples_leaf = st.sidebar.slider("Min Samples Leaf", 1, 100, 20)
-    
-    
-    # Initialize session state
-    if 'model' not in st.session_state:
-        st.session_state.model = None
-        st.session_state.feature_columns = None
-        st.session_state.running = False
-
-    # Main area
-    col1, col2 = st.columns([2, 1])
+    # Create two columns for inputs
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Model Training and Backtesting")
+        # Prompt input
+        prompt = st.text_area(
+            "Enter your prompt:",
+            placeholder="Example: A cute pony in a magical forest",
+            height=100
+        )
         
-        if st.button("Train Model"):
-            if st.session_state.api is None:
-                st.error("Please enter valid API credentials first")
-            else:
-                try:
-                    # Prepare parameters
-                    end_date = datetime.now()
-                    start_date = end_date - timedelta(days=lookback_days)
-                    
-                    model_params = {
-                        'n_estimators': n_estimators,
-                        'min_samples_split': min_samples_split,
-                        'min_samples_leaf': min_samples_leaf,
-                        'random_state': 42
-                    }
-                    
-                    feature_params = {
-                        'sma_short': sma_short,
-                        'sma_long': sma_long,
-                        'rsi_period': rsi_period
-                    }
-                    
-                    with st.spinner('Training model...'):
-                        model, backtest_results, feature_columns, accuracy = train_model(
-                            st.session_state.api, symbol, timeframe, 
-                            start_date.strftime('%Y-%m-%d'),
-                            end_date.strftime('%Y-%m-%d'),
-                            model_params, feature_params
-                        )
-                        
-                        st.session_state.model = model
-                        st.session_state.feature_columns = feature_columns
-                        
-                        # Display backtest results
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=backtest_results.index,
-                            y=backtest_results['cumulative_returns'],
-                            name='Strategy Returns'
-                        ))
-                        fig.add_trace(go.Scatter(
-                            x=backtest_results.index,
-                            y=backtest_results['buy_hold_returns'],
-                            name='Buy & Hold Returns'
-                        ))
-                        fig.update_layout(title='Backtest Results',
-                                        xaxis_title='Date',
-                                        yaxis_title='Cumulative Returns')
-                        st.plotly_chart(fig)
-
-                      
-
-                        # Display metrics
-                        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                        with metrics_col1:
-                            st.metric("Model Accuracy", f"{accuracy:.2%}")
-                        with metrics_col2:
-                            total_returns = backtest_results['cumulative_returns'].iloc[-1] - 1
-                            st.metric("Total Returns", f"{total_returns:.2f}")
-                        with metrics_col3:
-                            sharpe = np.sqrt(365) * (backtest_results['strategy_returns'].mean() 
-                                                   / backtest_results['strategy_returns'].std())
-                            st.metric("Sharpe Ratio", f"{sharpe:.2f}")
-
-                        backtest_results[:]
-                        
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+        # Negative prompt input
+        negative_prompt = st.text_area(
+            "Negative prompt (what to avoid):",
+            placeholder="Example: blurry, bad quality, distorted",
+            height=100
+        )
     
     with col2:
-        st.subheader("Live Trading")
-        if st.session_state.model is None:
-            st.warning("Please train the model first")
-        elif st.session_state.api is None:
-            st.warning("Please enter valid API credentials")
-        else:
-            if st.button("Start Trading" if not st.session_state.running else "Stop Trading"):
-                st.session_state.running = not st.session_state.running
-            
-            if st.session_state.running:
-                placeholder = st.empty()
-                try:
-                    while st.session_state.running:
-                        # Get current data
-                        current_data = st.session_state.api.get_crypto_bars(symbol, timeframe).df
-                        current_data = create_features(                 
-                            current_data, sma_short, sma_long, rsi_period
-                        )
-                        
-                    
-                                  
-                        
-                            
+        # Advanced settings
+        st.subheader("Generation Settings")
+        guidance_scale = st.slider(
+            "Guidance Scale (how closely to follow the prompt)",
+            min_value=1.0,
+            max_value=20.0,
+            value=7.5,
+            step=0.5
+        )
         
-                        # Make prediction current_features
-                        current_features = current_data[st.session_state.feature_columns].iloc[-1].values.reshape(1, -1)
-                        prediction = st.session_state.model.predict(current_features)[0]
+        steps = st.slider(
+            "Number of Steps",
+            min_value=20,
+            max_value=100,
+            value=30,
+            step=1
+        )
 
-                        if prediction == 1:  # Predicted price increase
-                            try:
-                                position = st.session_state.api.get_position(symbol)
-
-                            except:
-                                st.session_state.api.submit_order(
-                                    symbol,
-                                    qty=position_size,
-                                    side='buy',
-                                    type='market',
-                                    time_in_force='gtc'
-                                )
-                        else:  # Predicted price decrease
-                            try:
-                                position = st.session_state.api.get_position(symbol)
-                                st.session_state.api.submit_order(
-                                    symbol,
-                                    qty=position_size,
-                                    side='sell',
-                                    type='market',
-                                    time_in_force='gtc'
-                                )
-                            except:
-                                print("No position to sell...")
-                        # Update display
-                        with placeholder.container():
-                            st.metric("Current Price", 
-                                    f"${current_data['close'].iloc[-1]:.2f}")
-                            st.metric("Trading Signal",
-                                    (f"Buy") if prediction == 1 else (f"Sell"))
-                            st.metric("Last Updated",
-                                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                        
-                        time.sleep(60)  # Update every minute
-                        
-                except Exception as e:
-                    st.error(f"Trading Error: {str(e)}")
-                    st.session_state.running = False
+    # Generate button
+    if st.button("🎨 Generate Image", use_container_width=True):
+        if prompt:
+            try:
+                with st.spinner("🔄 Loading model... (this might take a few minutes the first time)"):
+                    pipeline = load_model()
+                
+                progress_text = "🎨 Creating your masterpiece..."
+                with st.spinner(progress_text):
+                    image = generate_image(
+                        pipeline,
+                        prompt,
+                        negative_prompt,
+                        guidance_scale,
+                        steps
+                    )
+                
+                # Display the generated image
+                st.image(
+                    image,
+                    caption=f"Generated Image: {prompt}",
+                    use_column_width=True
+                )
+                
+                # Create download button
+                buf = BytesIO()
+                image.save(buf, format="PNG")
+                byte_im = buf.getvalue()
+                
+                st.download_button(
+                    label="📥 Download Image",
+                    data=byte_im,
+                    file_name="pony_xl_generated.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+                
+            except Exception as e:
+                st.error(f"❌ An error occurred: {str(e)}")
+                if not torch.cuda.is_available():
+                    st.warning("⚠️ Running on CPU mode. This model works best with a GPU.")
+                st.info("💡 Tip: Try reducing the image quality settings if you're running out of memory.")
+        else:
+            st.warning("⚠️ Please enter a prompt first!")
+    
+    # Add helpful information at the bottom
+    with st.expander("ℹ️ Tips for better results"):
+        st.markdown("""
+        - Be specific in your descriptions
+        - Include details about lighting, atmosphere, and style
+        - Use the negative prompt to remove unwanted elements
+        - Adjust the guidance scale: higher values = closer to prompt but less creative
+        - More steps generally mean better quality but slower generation
+        """)
 
 if __name__ == "__main__":
     main()
-
-
-

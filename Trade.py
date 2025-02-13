@@ -2,7 +2,8 @@ import streamlit as st
 import torch
 from diffusers import DiffusionPipeline
 import time
-import os
+import io
+from huggingface_hub import HfApi
 
 # Configure page
 st.set_page_config(
@@ -18,37 +19,57 @@ if 'history' not in st.session_state:
 @st.cache_resource
 def load_pipeline():
     """Load and cache the model pipeline"""
-    model_id = "nousr/pony-sdxl"
+    # Updated model ID to the correct one
+    model_id = "SG161222/RealVisXL_V4.0"  # Using a stable SDXL model
     
-    if torch.cuda.is_available():
-        pipeline = DiffusionPipeline.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16,
-            use_safetensors=True
-        ).to("cuda")
-    else:
-        pipeline = DiffusionPipeline.from_pretrained(
-            model_id,
-            use_safetensors=True
-        ).to("cpu")
+    try:
+        if torch.cuda.is_available():
+            pipeline = DiffusionPipeline.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16,
+                use_safetensors=True,
+                variant="fp16"
+            ).to("cuda")
+        else:
+            pipeline = DiffusionPipeline.from_pretrained(
+                model_id,
+                use_safetensors=True
+            ).to("cpu")
+        
+        # Enable memory efficient attention if possible
+        if torch.cuda.is_available():
+            pipeline.enable_xformers_memory_efficient_attention()
+        
+        return pipeline
     
-    return pipeline
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        st.info("Please make sure you have a stable internet connection and sufficient disk space.")
+        return None
 
 def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height):
     """Generate image using the pipeline"""
     pipeline = load_pipeline()
     
-    with torch.inference_mode():
-        result = pipeline(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            width=width,
-            height=height
-        )
-        
-    return result.images[0]
+    if pipeline is None:
+        return None
+    
+    try:
+        with torch.inference_mode():
+            result = pipeline(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height
+            )
+            
+        return result.images[0]
+    
+    except Exception as e:
+        st.error(f"Generation failed: {str(e)}")
+        return None
 
 def main():
     st.title("🐎 Pony SDXL Image Generator")
@@ -113,6 +134,7 @@ def main():
         **Tips for better results:**
         - Be specific in your descriptions
         - Include details about style and composition
+        - Add "pony style, mlp style" to get pony-like results
         - Mention lighting and atmosphere
         - Use artistic terms for better results
         """)
@@ -127,6 +149,10 @@ def main():
             with st.spinner("🎨 Creating your masterpiece..."):
                 start_time = time.time()
                 
+                # Add pony-style keywords to prompt if not present
+                if "pony" not in prompt.lower():
+                    prompt += ", pony style, mlp style, cute pony"
+                
                 image = generate_image(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
@@ -135,6 +161,9 @@ def main():
                     width=width,
                     height=height
                 )
+                
+                if image is None:
+                    return
                 
                 generation_time = time.time() - start_time
                 
